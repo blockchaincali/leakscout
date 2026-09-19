@@ -1,0 +1,5 @@
+sku,product_name,current_stock,unit_cost,lead_time_days
+SKU001,Milk 1L,4,1950,7
+SKU002,Premium Cookies,40,3200,5
+SKU003,Orange Juice,60,1100,3
+SKU004,Luxury Cereal,25,4800,10
