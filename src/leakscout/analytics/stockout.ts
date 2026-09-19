@@ -3,11 +3,12 @@ import type {
   LeakCandidate,
   SalesRow,
 } from '../types.js'
-import { currency, latestSalesDate, withinPreviousDays } from './utils.js'
+import { latestSalesDate, withinPreviousDays } from './utils.js'
 
 export function findStockoutRisks(
   sales: SalesRow[],
   inventory: InventoryRow[],
+  currency: string,
 ): LeakCandidate[] {
   const latest = latestSalesDate(sales)
   const recent = sales.filter((row) =>
@@ -56,7 +57,7 @@ export function findStockoutRisks(
       ],
       impact: {
         value: Math.round(revenueAtRisk),
-        currency: 'NGN',
+        currency,
         type: 'revenue_at_risk',
       },
       confidence: 'high',

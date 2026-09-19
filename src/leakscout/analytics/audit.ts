@@ -7,13 +7,20 @@ import { findSalesAnomalies } from './anomalies.js'
 import { findDeadInventory } from './deadStock.js'
 import { findMarginLeaks } from './margins.js'
 import { findStockoutRisks } from './stockout.js'
-import { daysBetween, latestSalesDate } from './utils.js'
+import {
+  daysBetween,
+  latestSalesDate,
+  validateCurrency,
+} from './utils.js'
 
 export function runProfitAudit(
   sales: SalesRow[],
   inventory: InventoryRow[],
+  requestedCurrency = 'NGN',
 ): AuditResult {
   if (!sales.length) throw new Error('No sales data supplied.')
+
+  const currency = validateCurrency(requestedCurrency)
 
   const earliest = new Date(
     Math.min(...sales.map((row) => row.date.getTime())),
@@ -26,10 +33,10 @@ export function runProfitAudit(
   )
 
   const candidates = [
-    ...findStockoutRisks(sales, inventory),
-    ...findMarginLeaks(sales),
-    ...findDeadInventory(sales, inventory),
-    ...findSalesAnomalies(sales),
+    ...findStockoutRisks(sales, inventory, currency),
+    ...findMarginLeaks(sales, currency),
+    ...findDeadInventory(sales, inventory, currency),
+    ...findSalesAnomalies(sales, currency),
   ].sort((a, b) => b.impact.value - a.impact.value)
 
   return {
@@ -41,6 +48,7 @@ export function runProfitAudit(
       ]).size,
       periodDays: daysBetween(earliest, latest) + 1,
       revenue: Math.round(revenue),
+      currency,
     },
     candidates,
   }

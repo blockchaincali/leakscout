@@ -35,7 +35,7 @@ export type LeakCandidate = {
   evidence: string[]
   impact: {
     value: number
-    currency: 'NGN'
+    currency: string
     type: ImpactType
   }
   confidence: 'high' | 'medium' | 'low'
@@ -48,6 +48,7 @@ export type AuditResult = {
     products: number
     periodDays: number
     revenue: number
+    currency: string
   }
   candidates: LeakCandidate[]
 }

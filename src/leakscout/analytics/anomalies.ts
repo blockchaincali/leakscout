@@ -1,8 +1,13 @@
 import type { LeakCandidate, SalesRow } from '../types.js'
-import { DAY_MS, latestSalesDate } from './utils.js'
+import {
+  DAY_MS,
+  formatMoney,
+  latestSalesDate,
+} from './utils.js'
 
 export function findSalesAnomalies(
   sales: SalesRow[],
+  currency: string,
 ): LeakCandidate[] {
   const latest = latestSalesDate(sales)
   const latestMs = latest.getTime()
@@ -54,12 +59,12 @@ export function findSalesAnomalies(
       title: `${productName} sales have dropped unusually`,
       evidence: [
         `Recent 7-day revenue is ${declinePct.toFixed(1)}% below its previous run rate`,
-        `Expected 7-day revenue: ₦${Math.round(expectedRecentRevenue).toLocaleString('en-NG')}`,
-        `Actual 7-day revenue: ₦${Math.round(recentRevenue).toLocaleString('en-NG')}`,
+        `Expected 7-day revenue: ${formatMoney(expectedRecentRevenue, currency)}`,
+        `Actual 7-day revenue: ${formatMoney(recentRevenue, currency)}`,
       ],
       impact: {
         value: Math.round(revenueDecline),
-        currency: 'NGN',
+        currency,
         type: 'revenue_decline',
       },
       confidence: declinePct >= 40 ? 'high' : 'medium',

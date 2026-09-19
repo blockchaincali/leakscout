@@ -3,11 +3,16 @@ import type {
   LeakCandidate,
   SalesRow,
 } from '../types.js'
-import { daysBetween, latestSalesDate } from './utils.js'
+import {
+  daysBetween,
+  formatMoney,
+  latestSalesDate,
+} from './utils.js'
 
 export function findDeadInventory(
   sales: SalesRow[],
   inventory: InventoryRow[],
+  currency: string,
 ): LeakCandidate[] {
   const latest = latestSalesDate(sales)
   const results: LeakCandidate[] = []
@@ -27,7 +32,6 @@ export function findDeadInventory(
     if (daysSinceLastSale < 45) continue
 
     const capitalTiedUp = item.currentStock * item.unitCost
-
     if (capitalTiedUp <= 0) continue
 
     results.push({
@@ -40,11 +44,11 @@ export function findDeadInventory(
           ? `No recorded sale for ${daysSinceLastSale} days`
           : 'No recorded sales in the dataset',
         `${item.currentStock} units currently in stock`,
-        `Current unit cost is ₦${Math.round(item.unitCost).toLocaleString('en-NG')}`,
+        `Current unit cost is ${formatMoney(item.unitCost, currency)}`,
       ],
       impact: {
         value: Math.round(capitalTiedUp),
-        currency: 'NGN',
+        currency,
         type: 'capital_tied_up',
       },
       confidence: 'high',

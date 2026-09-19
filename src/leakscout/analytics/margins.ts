@@ -19,7 +19,10 @@ function stats(rows: SalesRow[]): PeriodStats {
   )
 }
 
-export function findMarginLeaks(sales: SalesRow[]): LeakCandidate[] {
+export function findMarginLeaks(
+  sales: SalesRow[],
+  currency: string,
+): LeakCandidate[] {
   const latest = latestSalesDate(sales)
   const latestMs = latest.getTime()
 
@@ -47,7 +50,6 @@ export function findMarginLeaks(sales: SalesRow[]): LeakCandidate[] {
 
     const recentPrice = recent.revenue / recent.units
     const baselinePrice = baseline.revenue / baseline.units
-
     const recentCost = recent.cost / recent.units
     const baselineCost = baseline.cost / baseline.units
 
@@ -87,7 +89,7 @@ export function findMarginLeaks(sales: SalesRow[]): LeakCandidate[] {
       ],
       impact: {
         value: Math.round(monthlyProfitLeak),
-        currency: 'NGN',
+        currency,
         type: 'monthly_profit_leak',
       },
       confidence: 'high',
