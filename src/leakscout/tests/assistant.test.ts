@@ -265,7 +265,8 @@ test('public assistant uses one bounded product-grounded completion', async () =
         assert.match(request.system, /deterministic code/i)
         assert.match(request.system, /synthetic data/i)
         assert.match(request.system, /USD is the default demo currency/i)
-        assert.match(request.system, /does not perform FX conversion/i)
+        assert.match(request.system, /fixed illustrative FX rates/i)
+        assert.match(request.system, /not live market rates/i)
         assert.match(request.system, /never pretend/i)
         assert.doesNotMatch(request.user, /merchantData|customer|payment/i)
         return {

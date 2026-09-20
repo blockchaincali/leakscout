@@ -20,6 +20,10 @@ import { findMarginLeaks } from '../analytics/margins.js'
 import { findSalesAnomalies } from '../analytics/anomalies.js'
 import { executeLeakScout } from '../web/service.js'
 import { createLeakScoutApp } from '../web/server.js'
+import {
+  convertDemoDataset,
+  DEMO_NGN_PER_UNIT,
+} from '../web/demoCurrency.js'
 import { parseShopswiftAuditPayload } from '../integrations/shopswift.js'
 import type { InventoryRow, SalesRow } from '../types.js'
 import {
@@ -291,6 +295,61 @@ test('source currency labels values without performing conversion', async () => 
   assert.equal(usd.audit.summary.currency, 'USD')
   assert.equal(usd.currencySemantics, 'source_accounting_currency')
   assert.throws(() => runSalesOnlyAudit(sales, 'not-money'), /Invalid currency/)
+})
+
+test('demo currency conversion clones canonical NGN data and converts only money', () => {
+  const sales = [sale('2026-01-01', {
+    quantity: 3,
+    unitPrice: 1_600,
+    unitCost: 800,
+  }), sale('2026-01-02', {
+    sku: 'UNKNOWN-COST',
+    unitPrice: 1_600,
+    unitCost: 0,
+    unitCostKnown: false,
+  })]
+  const inventory = [item({
+    currentStock: 12,
+    unitCost: 800,
+    leadTimeDays: 9,
+    sellingPrice: 1_600,
+    sellingPriceKnown: true,
+  }), item({
+    sku: 'UNKNOWN-COST',
+    unitCost: 0,
+    unitCostKnown: false,
+    sellingPrice: undefined,
+    sellingPriceKnown: false,
+  })]
+
+  const ngn = convertDemoDataset(sales, inventory, 'NGN')
+  const usd = convertDemoDataset(sales, inventory, 'USD')
+  const gbp = convertDemoDataset(sales, inventory, 'GBP')
+
+  assert.notEqual(usd.sales[0], sales[0])
+  assert.notEqual(usd.sales[0].date, sales[0].date)
+  assert.notEqual(usd.inventory[0], inventory[0])
+  assert.equal(ngn.sales[0].unitPrice, 1_600)
+  assert.equal(ngn.sales[0].unitCost, 800)
+  assert.equal(ngn.inventory[0].unitCost, 800)
+  assert.equal(ngn.inventory[0].sellingPrice, 1_600)
+  assert.equal(usd.sales[0].unitPrice, 1)
+  assert.equal(usd.sales[0].unitCost, 0.5)
+  assert.equal(usd.inventory[0].unitCost, 0.5)
+  assert.equal(usd.inventory[0].sellingPrice, 1)
+  assert.equal(gbp.sales[0].unitPrice, 1_600 / DEMO_NGN_PER_UNIT.GBP)
+  assert.equal(gbp.inventory[0].unitCost, 800 / DEMO_NGN_PER_UNIT.GBP)
+  assert.equal(usd.sales[0].quantity, 3)
+  assert.equal(usd.sales[0].date.getTime(), sales[0].date.getTime())
+  assert.equal(usd.inventory[0].currentStock, 12)
+  assert.equal(usd.inventory[0].leadTimeDays, 9)
+  assert.equal(usd.sales[1].unitCost, 0)
+  assert.equal(usd.inventory[1].unitCost, 0)
+  assert.equal(usd.inventory[1].sellingPrice, undefined)
+  assert.equal(sales[0].unitPrice, 1_600)
+  assert.equal(sales[0].unitCost, 800)
+  assert.equal(inventory[0].unitCost, 800)
+  assert.equal(inventory[0].sellingPrice, 1_600)
 })
 
 test('agent input handling falls back safely and rejects invalid selections', () => {
@@ -820,7 +879,7 @@ test('audit API rejects invalid source currency', async () => {
   assert.equal(response.status, 400)
 })
 
-test('demo API defaults to USD and preserves synthetic numeric values', async () => {
+test('demo API converts canonical NGN fixtures into the selected demo currency', async () => {
   const beforeCalls = executeCalls.length
   const usd = await fetch(`${baseUrl}/api/demo`, {
     method: 'POST',
@@ -839,10 +898,16 @@ test('demo API defaults to USD and preserves synthetic numeric values', async ()
     body: JSON.stringify({ currency: 'GBP' }),
   })
 
-  const usdBody = await usd.json() as { audit: { summary: { currency: string; revenue: number } } }
-  const defaultBody = await defaultDemo.json() as { audit: { summary: { currency: string; revenue: number } } }
-  const ngnBody = await ngn.json() as { audit: { summary: { currency: string; revenue: number } } }
-  const gbpBody = await gbp.json() as { audit: { summary: { currency: string; revenue: number } } }
+  type DemoBody = {
+    audit: {
+      summary: { currency: string; revenue: number; inventoryValue?: number }
+      candidates: Array<{ category: string; evidence: string[]; metadata?: Record<string, number | string> }>
+    }
+  }
+  const usdBody = await usd.json() as DemoBody
+  const defaultBody = await defaultDemo.json() as DemoBody
+  const ngnBody = await ngn.json() as DemoBody
+  const gbpBody = await gbp.json() as DemoBody
 
   assert.equal(usd.status, 200)
   assert.equal(defaultDemo.status, 200)
@@ -852,8 +917,36 @@ test('demo API defaults to USD and preserves synthetic numeric values', async ()
   assert.equal(usdBody.audit.summary.currency, 'USD')
   assert.equal(ngnBody.audit.summary.currency, 'NGN')
   assert.equal(gbpBody.audit.summary.currency, 'GBP')
-  assert.equal(usdBody.audit.summary.revenue, ngnBody.audit.summary.revenue)
-  assert.equal(usdBody.audit.summary.revenue, gbpBody.audit.summary.revenue)
+  assert.equal(defaultBody.audit.summary.revenue, usdBody.audit.summary.revenue)
+  assert.equal(
+    usdBody.audit.summary.revenue,
+    Math.round(ngnBody.audit.summary.revenue / DEMO_NGN_PER_UNIT.USD),
+  )
+  assert.equal(
+    gbpBody.audit.summary.revenue,
+    Math.round(ngnBody.audit.summary.revenue / DEMO_NGN_PER_UNIT.GBP),
+  )
+  assert.ok(usdBody.audit.summary.revenue < ngnBody.audit.summary.revenue)
+  assert.deepEqual(
+    usdBody.audit.candidates.map((candidate) => candidate.category),
+    ngnBody.audit.candidates.map((candidate) => candidate.category),
+  )
+  assert.deepEqual(
+    usdBody.audit.candidates.map((candidate) => candidate.evidence.filter((item) => item.includes('%'))),
+    ngnBody.audit.candidates.map((candidate) => candidate.evidence.filter((item) => item.includes('%'))),
+  )
+  assert.deepEqual(
+    usdBody.audit.candidates.map((candidate) => ({
+      daysCover: candidate.metadata?.daysCover,
+      leadTimeDays: candidate.metadata?.leadTimeDays,
+      shortageUnits: candidate.metadata?.shortageUnits,
+    })),
+    ngnBody.audit.candidates.map((candidate) => ({
+      daysCover: candidate.metadata?.daysCover,
+      leadTimeDays: candidate.metadata?.leadTimeDays,
+      shortageUnits: candidate.metadata?.shortageUnits,
+    })),
+  )
   assert.deepEqual(executeCalls.slice(beforeCalls), ['USD', 'USD', 'NGN', 'GBP'])
 })
 
@@ -891,7 +984,7 @@ test('demo selector is USD by default and sends only its selected currency', asy
 
   assert.match(html, /id="demo-currency"/)
   assert.match(html, /<option value="USD" selected>/)
-  assert.match(html, /Demo values are synthetic\.[\s\S]*not exchange rates\./)
+  assert.match(html, /Synthetic demo data · fixed illustrative FX rates, not live/)
   assert.doesNotMatch(html, /demo data uses NGN|NGN demo/i)
   assert.match(app, /demoCurrencyInput\?\.value\s*\|\|\s*'USD'/)
   assert.match(app, /body: JSON\.stringify\(\{ currency \}\)/)

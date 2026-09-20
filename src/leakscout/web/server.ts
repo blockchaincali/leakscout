@@ -19,6 +19,7 @@ import {
 import { AssistantInferenceError, InputError } from '../errors.js'
 import { parseShopswiftAuditPayload } from '../integrations/shopswift.js'
 import type { InventoryRow, SalesRow } from '../types.js'
+import { convertDemoDataset, type DemoCurrency } from './demoCurrency.js'
 import {
   answerPublicLeakScoutQuestion,
   answerLeakScoutQuestion,
@@ -76,13 +77,15 @@ export const DEMO_CURRENCIES = [
   'NZD',
 ] as const
 
+type SupportedDemoCurrency = (typeof DEMO_CURRENCIES)[number]
+
 const demoRequestSchema = z
   .object({
     currency: z.enum(DEMO_CURRENCIES).optional(),
   })
   .strict()
 
-function parseDemoRequest(input: unknown): (typeof DEMO_CURRENCIES)[number] {
+function parseDemoRequest(input: unknown): SupportedDemoCurrency {
   const parsed = demoRequestSchema.safeParse(input ?? {})
 
   if (!parsed.success) {
@@ -305,10 +308,16 @@ app.post(
         ),
       )
 
+    const converted = convertDemoDataset(
+      sales,
+      inventory,
+      currency as DemoCurrency,
+    )
+
     const result =
       await execute(
-        sales,
-        inventory,
+        converted.sales,
+        converted.inventory,
         currency,
       )
 
