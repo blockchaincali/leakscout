@@ -8,6 +8,7 @@ const inventoryLabel = document.querySelector('#inventory-label')
 const salesZone = document.querySelector('#sales-zone')
 const inventoryZone = document.querySelector('#inventory-zone')
 const currencyInput = document.querySelector('#currency')
+const demoCurrencyInput = document.querySelector('#demo-currency')
 const demoButton = document.querySelector('#demo-button')
 const demoTriggers = document.querySelectorAll('.demo-trigger')
 const auditButton = document.querySelector('#audit-button')
@@ -24,8 +25,27 @@ const rerunButton = document.querySelector('#rerun-button')
 
 let progressTimer = null
 
+const currencyLocales = {
+  USD: 'en-US',
+  NGN: 'en-NG',
+  GBP: 'en-GB',
+  EUR: 'en-IE',
+  GHS: 'en-GH',
+  KES: 'en-KE',
+  ZAR: 'en-ZA',
+  CAD: 'en-CA',
+  AUD: 'en-AU',
+  INR: 'en-IN',
+  JPY: 'ja-JP',
+  AED: 'en-AE',
+  SAR: 'ar-SA',
+  CHF: 'de-CH',
+  SGD: 'en-SG',
+  NZD: 'en-NZ',
+}
+
 function money(value, currency) {
-  return new Intl.NumberFormat(undefined, {
+  return new Intl.NumberFormat(currencyLocales[currency] ?? undefined, {
     style: 'currency',
     currency,
     maximumFractionDigits: 0,
@@ -1276,6 +1296,10 @@ function renderResult(payload) {
 }
 
 async function runDemo() {
+  const currency =
+    demoCurrencyInput?.value ||
+    'USD'
+
   setBusy(true, 'full')
 
   try {
@@ -1288,7 +1312,7 @@ async function runDemo() {
             'content-type':
               'application/json',
           },
-          body: JSON.stringify({}),
+          body: JSON.stringify({ currency }),
         },
       )
 

@@ -96,7 +96,7 @@
         <div class="hero-actions">
           <a class="button primary" href="#audit-card">Run profit audit <span aria-hidden="true">→</span></a>
           <button class="button secondary demo-trigger" type="button">Try demo business</button>
-          <span class="no-upload-note">No upload required · demo data uses NGN</span>
+          <span class="no-upload-note">No upload required · choose your demo currency</span>
         </div>
 
         <div class="proof-row">
@@ -257,6 +257,38 @@
 
             <div class="action-buttons">
               <div class="demo-action">
+                <div class="demo-currency-control">
+                  <label for="demo-currency">
+                    Demo currency
+                  </label>
+
+                  <select
+                    id="demo-currency"
+                    name="demoCurrency"
+                  >
+                    <option value="USD" selected>USD — US Dollar ($)</option>
+                    <option value="NGN">NGN — Nigerian Naira (₦)</option>
+                    <option value="GBP">GBP — British Pound (£)</option>
+                    <option value="EUR">EUR — Euro (€)</option>
+                    <option value="GHS">GHS — Ghanaian Cedi (GH₵)</option>
+                    <option value="KES">KES — Kenyan Shilling (KSh)</option>
+                    <option value="ZAR">ZAR — South African Rand (R)</option>
+                    <option value="CAD">CAD — Canadian Dollar (CA$)</option>
+                    <option value="AUD">AUD — Australian Dollar (A$)</option>
+                    <option value="INR">INR — Indian Rupee (₹)</option>
+                    <option value="JPY">JPY — Japanese Yen (¥)</option>
+                    <option value="AED">AED — UAE Dirham</option>
+                    <option value="SAR">SAR — Saudi Riyal</option>
+                    <option value="CHF">CHF — Swiss Franc</option>
+                    <option value="SGD">SGD — Singapore Dollar</option>
+                    <option value="NZD">NZD — New Zealand Dollar</option>
+                  </select>
+
+                  <small class="demo-helper">
+                    Demo values are synthetic. Currency selection changes accounting denomination, not exchange rates.
+                  </small>
+                </div>
+
                 <button
                   type="button"
                   class="button secondary"
@@ -264,10 +296,6 @@
                 >
                   Try demo business
                 </button>
-
-                <small class="demo-helper">
-                  No upload required · NGN demo
-                </small>
               </div>
 
               <button

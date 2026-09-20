@@ -5,6 +5,7 @@ import { rateLimit } from 'express-rate-limit'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createHash, timingSafeEqual } from 'node:crypto'
+import { z } from 'zod'
 import {
   loadInventoryCsv,
   loadSalesCsv,
@@ -54,6 +55,44 @@ type LeakScoutAppOptions = {
   answerPublic?: (
     request: PublicAssistantRequest,
   ) => Promise<PublicAssistantResponse>
+}
+
+export const DEMO_CURRENCIES = [
+  'USD',
+  'NGN',
+  'GBP',
+  'EUR',
+  'GHS',
+  'KES',
+  'ZAR',
+  'CAD',
+  'AUD',
+  'INR',
+  'JPY',
+  'AED',
+  'SAR',
+  'CHF',
+  'SGD',
+  'NZD',
+] as const
+
+const demoRequestSchema = z
+  .object({
+    currency: z.enum(DEMO_CURRENCIES).optional(),
+  })
+  .strict()
+
+function parseDemoRequest(input: unknown): (typeof DEMO_CURRENCIES)[number] {
+  const parsed = demoRequestSchema.safeParse(input ?? {})
+
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0]
+    throw new InputError(
+      `Invalid demo request. ${issue?.message ?? 'Validation failed.'}`,
+    )
+  }
+
+  return parsed.data.currency ?? 'USD'
 }
 
 function secretsMatch(provided: string, expected: string): boolean {
@@ -241,7 +280,13 @@ app.post(
 app.post(
   '/api/demo',
   demoLimiter,
+  express.json({
+    limit: '4kb',
+    type: 'application/json',
+  }),
   async (req, res) => {
+    const currency = parseDemoRequest(req.body)
+
     const sales =
       await loadSalesCsv(
         join(
@@ -264,7 +309,7 @@ app.post(
       await execute(
         sales,
         inventory,
-        'NGN',
+        currency,
       )
 
     res.json(result)

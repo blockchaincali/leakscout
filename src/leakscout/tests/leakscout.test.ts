@@ -3,6 +3,7 @@ import { after, before, test } from 'node:test'
 import type { AddressInfo } from 'node:net'
 import type { Server } from 'node:http'
 import { once } from 'node:events'
+import { readFile } from 'node:fs/promises'
 import {
   parseInventoryCsvText,
   parseSalesCsvText,
@@ -336,6 +337,7 @@ test('agent input handling falls back safely and rejects invalid selections', ()
 let server: Server
 let baseUrl: string
 const integrationSecret = 'test-integration-secret'
+const executeCalls: string[] = []
 
 const integrationRequest = (
   body: unknown,
@@ -395,17 +397,21 @@ const publicAssistantRequest = (body: unknown) =>
 before(async () => {
   server = createLeakScoutApp({
     integrationSecret,
-    execute: (sales, inventory, currency) => executeLeakScout(
-      sales,
-      inventory,
-      currency,
-      {
+    execute: (sales, inventory, currency) => {
+      executeCalls.push(currency)
+
+      return executeLeakScout(
+        sales,
+        inventory,
+        currency,
+        {
         // Automated tests must never make paid provider calls.
-        runAgent: async () => {
-          throw new Error('Simulated provider failure')
+          runAgent: async () => {
+            throw new Error('Simulated provider failure')
+          },
         },
-      },
-    ),
+      )
+    },
     generateBrief: async (request) => {
       if (request.context.currency === 'ERR') {
         throw new AssistantInferenceError()
@@ -814,13 +820,92 @@ test('audit API rejects invalid source currency', async () => {
   assert.equal(response.status, 400)
 })
 
-test('existing demo and CSV audit routes remain available without integration auth', async () => {
-  const demo = await fetch(`${baseUrl}/api/demo`, { method: 'POST' })
+test('demo API defaults to USD and preserves synthetic numeric values', async () => {
+  const beforeCalls = executeCalls.length
+  const usd = await fetch(`${baseUrl}/api/demo`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ currency: 'USD' }),
+  })
+  const defaultDemo = await fetch(`${baseUrl}/api/demo`, { method: 'POST' })
+  const ngn = await fetch(`${baseUrl}/api/demo`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ currency: 'NGN' }),
+  })
+  const gbp = await fetch(`${baseUrl}/api/demo`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ currency: 'GBP' }),
+  })
+
+  const usdBody = await usd.json() as { audit: { summary: { currency: string; revenue: number } } }
+  const defaultBody = await defaultDemo.json() as { audit: { summary: { currency: string; revenue: number } } }
+  const ngnBody = await ngn.json() as { audit: { summary: { currency: string; revenue: number } } }
+  const gbpBody = await gbp.json() as { audit: { summary: { currency: string; revenue: number } } }
+
+  assert.equal(usd.status, 200)
+  assert.equal(defaultDemo.status, 200)
+  assert.equal(ngn.status, 200)
+  assert.equal(gbp.status, 200)
+  assert.equal(defaultBody.audit.summary.currency, 'USD')
+  assert.equal(usdBody.audit.summary.currency, 'USD')
+  assert.equal(ngnBody.audit.summary.currency, 'NGN')
+  assert.equal(gbpBody.audit.summary.currency, 'GBP')
+  assert.equal(usdBody.audit.summary.revenue, ngnBody.audit.summary.revenue)
+  assert.equal(usdBody.audit.summary.revenue, gbpBody.audit.summary.revenue)
+  assert.deepEqual(executeCalls.slice(beforeCalls), ['USD', 'USD', 'NGN', 'GBP'])
+})
+
+test('demo API rejects invalid JSON bodies and currencies', async () => {
+  const unsupported = await fetch(`${baseUrl}/api/demo`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ currency: 'XYZ' }),
+  })
+  const unknownProperty = await fetch(`${baseUrl}/api/demo`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ currency: 'USD', exchangeRate: 1 }),
+  })
+  const malformed = await fetch(`${baseUrl}/api/demo`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{bad json',
+  })
+
+  assert.equal(unsupported.status, 400)
+  assert.equal(unknownProperty.status, 400)
+  assert.equal(malformed.status, 400)
+  assert.equal(
+    (await malformed.json() as { error: string }).error,
+    'Request body contains malformed JSON.',
+  )
+})
+
+test('demo selector is USD by default and sends only its selected currency', async () => {
+  const [html, app] = await Promise.all([
+    readFile('public/index.html', 'utf8'),
+    readFile('public/app.js', 'utf8'),
+  ])
+
+  assert.match(html, /id="demo-currency"/)
+  assert.match(html, /<option value="USD" selected>/)
+  assert.match(html, /Demo values are synthetic\.[\s\S]*not exchange rates\./)
+  assert.doesNotMatch(html, /demo data uses NGN|NGN demo/i)
+  assert.match(app, /demoCurrencyInput\?\.value\s*\|\|\s*'USD'/)
+  assert.match(app, /body: JSON\.stringify\(\{ currency \}\)/)
+  assert.match(app, /USD: 'en-US'/)
+  assert.match(app, /NGN: 'en-NG'/)
+  const runDemoSource = app.slice(app.indexOf('async function runDemo'), app.indexOf('async function runUploadAudit'))
+  assert.doesNotMatch(runDemoSource, /currencyInput\.value|FormData|exchangeRate|convert/)
+})
+
+test('existing CSV audit route remains available without integration auth', async () => {
 
   const form = new FormData()
   form.append('inventory', new Blob(['sku,product name,stock\nA,Alpha,1']), 'inventory.csv')
   const audit = await fetch(`${baseUrl}/api/audit`, { method: 'POST', body: form })
 
-  assert.equal(demo.status, 200)
   assert.equal(audit.status, 200)
 })

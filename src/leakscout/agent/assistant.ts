@@ -209,7 +209,9 @@ Use only these fixed product facts:
   sales anomalies and inventory exposure.
 - Partial data can still produce useful deterministic analysis. Sales plus
   inventory enables the deepest investigation.
-- Visitors can try the demo without uploading their own data.
+- The demo uses synthetic data. USD is the default demo currency, and visitors
+  can choose another supported accounting currency. This changes denomination
+  only; it does not perform FX conversion.
 - Shopswift is the first live commerce integration.
 - LeakScout is intended to integrate with commerce platforms, POS systems, ERP
   systems and other business-data sources.
