@@ -1607,3 +1607,132 @@ footer {
     border-radius: 20px;
   }
 }
+
+/* LeakScout launcher surface refinement */
+.leakscout-chat-launcher {
+  background: rgba(244, 246, 242, 0.94);
+  border-color: var(--line-dark);
+  backdrop-filter: blur(12px);
+}
+
+.leakscout-chat-launcher:hover {
+  background: var(--surface);
+}
+
+
+
+/* LEAKSCOUT TOP NAV */
+
+.top-nav {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-left: auto;
+  margin-right: 24px;
+}
+
+.top-nav a {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 700;
+  transition: color 150ms ease;
+}
+
+.top-nav a:hover {
+  color: var(--ink);
+}
+
+.nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mobile-menu {
+  display: none;
+  position: relative;
+}
+
+.mobile-menu summary {
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.72);
+  list-style: none;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mobile-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.mobile-menu summary span {
+  display: block;
+  width: 18px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--ink);
+}
+
+.mobile-menu nav {
+  position: absolute;
+  top: 52px;
+  right: 0;
+  width: 220px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  z-index: 70;
+}
+
+.mobile-menu nav a {
+  display: block;
+  padding: 11px 12px;
+  border-radius: 10px;
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.mobile-menu nav a:hover {
+  background: var(--surface-soft);
+}
+
+@media (max-width: 760px) {
+  .top-nav,
+  .desktop-orbio-pill {
+    display: none;
+  }
+
+  .mobile-menu {
+    display: block;
+  }
+
+  .mobile-menu summary {
+    display: flex;
+  }
+
+  .nav {
+    min-height: 78px;
+  }
+}
+
+/* Blend floating assistant launcher into LeakScout surface */
+.leakscout-chat-launcher {
+  background: rgba(244, 246, 242, 0.94);
+  border-color: var(--line-dark);
+  backdrop-filter: blur(12px);
+}
+
+.leakscout-chat-launcher:hover {
+  background: var(--surface);
+}
