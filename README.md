@@ -1,104 +1,132 @@
-<p align="center">
-  <img src="assets/orb.png" alt="" width="72" />
-</p>
+# LeakScout
 
-<h1 align="center">Orbio starter</h1>
+LeakScout is an autonomous business investigation agent that identifies verified profit and operational leaks in merchant data. It combines deterministic financial analysis with conditional agent reasoning so businesses receive evidence-backed findings and prioritized actions, not invented numbers.
 
-<p align="center">
-  An example of building on an Orbio key.<br />
-  Not required reading. Not a required stack. Build something magical.
-</p>
+**Live demo:** https://leakscout-production-deaf.up.railway.app
 
----
+**First integration target: Shopswift**
 
-## LeakScout
-
-LeakScout is a standalone business-intelligence engine and API for finding verified operational and financial signals in sales and inventory data. Shopswift is its first integration target; Shopswift-specific behavior is handled by flexible input parsing, not embedded in the analytics engine.
-
-```bash
-pnpm leakscout:web   # http://localhost:3000
-pnpm test            # deterministic and API tests
-pnpm typecheck
-```
-
-API endpoints:
-
-- `GET /api/health` — service capabilities and currency semantics.
-- `POST /api/audit` — multipart CSV audit with optional `sales`, optional `inventory`, and `sourceCurrency` (at least one file is required).
-- `POST /api/demo` — bundled demo business, denominated in NGN.
-
-`sourceCurrency` describes the currency already used in the uploaded data. LeakScout does not perform FX conversion or relabel the bundled demo. The execution boundary is `executeLeakScout(...)`: it selects a sales-only, inventory-only, or full deterministic audit and invokes Orbio only when a full audit has enough verified candidates to prioritize.
+## Architecture
 
 ```text
-CSV / future adapter -> deterministic analytics -> verified candidate IDs
-                    -> conditional Orbio prioritization -> report + actions
+Business data
+    -> deterministic analytics
+    -> verified candidate signals
+    -> decision whether inference is worthwhile
+    -> Orbio investigation
+    -> prioritized actions
 ```
 
-All uploaded files are processed in memory. Financial calculations remain deterministic; the agent cannot create candidates or change calculated financial values.
+- **LeakScout** is the standalone intelligence engine and API.
+- **Shopswift** is the first integration and deployment target. This repository does not claim that integration is already live.
+- **Orbio** is the autonomous inference and investigation layer used when verified candidates provide enough context to justify it.
 
----
+The core engineering principle is simple: **financial calculations are deterministic.** LeakScout's agent chooses what deserves attention, but it cannot create a candidate, invent a financial figure, or modify a value calculated by the analytics engine. If inference is unnecessary, lacks sufficient context, or fails, LeakScout returns an appropriate deterministic result.
 
-Your Orbio key is an [OpenRouter](https://openrouter.ai) key, funded by the credits your `$ORBIO` earns. One key, every model, and everything else OpenRouter does — image and video generation, web search, PDFs, voice, sandboxed shells, subagents. This repo shows the shapes, in TypeScript, with nothing hidden.
+## Audit modes
 
-Use it as a reference, copy one file out of it, or ignore it and write Python. The competition has no rules about how; only that the key is yours.
+- **Inventory-only:** evaluates catalogue health, field coverage, identifier quality, pricing visibility, inventory exposure where supported, and readiness for deeper investigation. It does not invoke Orbio.
+- **Sales-only:** evaluates supported sales, margin, and anomaly signals without pretending inventory context exists. It does not invoke Orbio.
+- **Full profit audit:** joins sales and inventory context, runs the full deterministic detector set, and conditionally invokes Orbio when there are enough verified candidates to prioritize.
 
-## Get a key
+## CSV ingestion
 
-1. Hold `$ORBIO` and connect the wallet at [orbio.so](https://orbio.so).
-2. Claim a key — on the dashboard, or from your agent through the [Orbio MCP](https://orbio.so/mcp) (`orbio_claim_key`).
-3. Put it in `.env.local`:
+LeakScout accepts a sales CSV, an inventory CSV, or both. Files are parsed in memory and are not stored by the application.
 
-```bash
-cp .env.example .env.local
-# OPENROUTER_API_KEY=sk-or-v1-…
-```
+Ingestion is designed for real merchant exports: headers are case- and punctuation-insensitive, and common aliases are accepted. For example, `sku`, `product_sku`, and `item_sku` can identify a product; `unit_price`, `selling_price`, and `retail_price` can identify selling price. Sales dates must use `YYYY-MM-DD` or an ISO timestamp. A product name, SKU, or barcode can identify inventory rows.
 
-That's the whole setup.
+Typical fields:
 
-## Run the examples
+| Dataset | Common fields |
+| --- | --- |
+| Sales | `date`, `sku`, `product_name`, `quantity`, `unit_price`, `unit_cost` |
+| Inventory | `sku`, `product_name`, `current_stock`, `unit_cost`, `selling_price`, `lead_time_days`, `category`, `available` |
+
+Unknown data remains unknown. For example, missing costs do not become selling prices, and inventory systems that use `-1` for untracked stock are not treated as having negative or zero inventory.
+
+### Source-currency semantics
+
+`sourceCurrency` declares the accounting currency already present in the uploaded files. LeakScout does not perform foreign-exchange conversion and does not relabel financial values. The bundled demo data is denominated in NGN.
+
+## API
+
+### `GET /api/health`
+
+Returns service status, supported data modes, architecture, and currency semantics.
+
+### `POST /api/audit`
+
+Runs an uploaded audit. Send `multipart/form-data` with:
+
+- `sales`: optional sales CSV
+- `inventory`: optional inventory CSV
+- `sourceCurrency`: optional ISO currency code; defaults to `NGN`
+
+At least one CSV is required. Providing both activates full-audit eligibility; Orbio is still invoked only when the deterministic result contains enough verified candidates.
+
+### `POST /api/demo`
+
+Runs the bundled full-audit demo using the NGN-denominated sample sales and inventory data.
+
+Successful audit responses include the deterministic audit, report, data mode, agent status, coverage limitations, provider attribution, and source-currency semantics.
+
+## Local development
+
+Requires Node.js 22+ and pnpm 10.
 
 ```bash
 pnpm install
-
-pnpm chat        # 01  streamed chat — the smallest useful call
-pnpm tools       # 02  tool calling, the agent loop with nothing hidden
-pnpm structured  # 03  structured outputs — typed JSON, validated end to end
-pnpm search      # 04  web search, run by OpenRouter (server tools)
-pnpm image       # 05  image generation on /api/v1/images
-pnpm pdf         # 06  read a PDF — a file is just another content part
-pnpm agent       # 07  all of it composed: research → shape → deliver
+cp .env.example .env.local
+pnpm leakscout:web
 ```
 
-Each one is a single file under [`src/examples`](src/examples), 30–80 lines, readable top to bottom. [`src/lib/openrouter.ts`](src/lib/openrouter.ts) is the only shared code: the client, a raw `fetch` for endpoints the SDK doesn't model, and a default model you can change with `OPENROUTER_MODEL`.
+Open http://localhost:3000. `pnpm start` runs the same LeakScout web server and is suitable for a production process command.
 
-## What the key can do
+## Environment variables
 
-| | docs |
-|---|---|
-| Every model — Claude, GPT, Gemini, open weights, `openrouter/auto` | [models](https://openrouter.ai/models) |
-| Image generation, video, text-to-speech | [image](https://openrouter.ai/docs/guides/overview/multimodal/image-generation) · [video](https://openrouter.ai/docs/guides/overview/multimodal/video-generation) · [tts](https://openrouter.ai/docs/guides/overview/multimodal/tts) |
-| Image, PDF, audio and video inputs | [multimodal](https://openrouter.ai/docs/guides/overview/multimodal/overview) |
-| Server tools: web search, web fetch, image gen, subagents, advisor, shell | [server tools](https://openrouter.ai/docs/guides/features/server-tools) · [containers](https://openrouter.ai/docs/guides/features/containers) |
-| Structured outputs, response healing | [structured outputs](https://openrouter.ai/docs/guides/features/structured-outputs) |
-| Tool calling with the Agent SDK | [agent sdk](https://openrouter.ai/docs/agent-sdk/call-model/tools) |
-| Run Claude Code or Codex on the key | [claude code](https://openrouter.ai/docs/cookbook/coding-agents/claude-code-integration) · [codex](https://openrouter.ai/docs/cookbook/coding-agents/codex-cli) |
-| Model fallbacks, `:nitro` / `:floor` / `:free` | [routing](https://openrouter.ai/docs/guides/routing/model-fallbacks) |
+```dotenv
+# Required for full audits that qualify for Orbio investigation.
+OPENROUTER_API_KEY=your_orbio_issued_openrouter_key
 
-Prefer using the key **from code** — the OpenAI SDK, the Vercel AI SDK, the OpenRouter Agent SDK — so what you build is an agent, not a chat window. Claude Code and Codex on the key are fine too.
+# Optional model override.
+OPENROUTER_MODEL=google/gemini-2.5-flash-lite
 
-## Ideas
+# Optional OpenRouter application attribution.
+APP_NAME=LeakScout
+APP_URL=http://localhost:3000
+```
 
-[`IDEAS.md`](IDEAS.md) has a list of directions people are circling. None of them is an assignment.
+- `OPENROUTER_API_KEY`: the Orbio-issued inference key used through OpenRouter. Never commit a real key.
+- `OPENROUTER_MODEL`: model used by the investigation layer. If omitted, the code's configured default is used.
+- `APP_NAME`: application name sent for OpenRouter attribution.
+- `APP_URL`: application URL sent for OpenRouter attribution.
 
-## Build Week
+## Automated tests
 
-Seven days, ten winners, 8M `$ORBIO`. Every approved builder gets $100 of inference to start and a 20% boost on the credits their holdings earn.
+```bash
+pnpm test
+pnpm typecheck
+pnpm lint
+node --check public/app.js
+```
 
-- Apply → [orbio.so/build](https://orbio.so/build)
-- The brief → [orbio.so/orbio-build-week.pdf](https://orbio.so/orbio-build-week.pdf)
+The suite covers deterministic analytics, CSV parsing safeguards, agent-output validation, partial-data behavior, and API behavior.
 
-Orbio ships new features daily during the week. All of it is yours to use.
+## Deployment
 
-## Licence
+LeakScout is a stateless Node.js service. Deploy the repository with:
 
-MIT. Take anything.
+```bash
+pnpm install --frozen-lockfile
+pnpm start
+```
+
+The server reads the platform-provided `PORT` environment variable and serves both the UI and API. Configure the four environment variables above in the deployment platform; keep `OPENROUTER_API_KEY` secret. The production deployment currently runs on Railway at https://leakscout-production-deaf.up.railway.app.
+
+## Attribution
+
+LeakScout was built for **Orbio Build Week** and uses an **Orbio-issued inference key** for conditional investigation through OpenRouter.
+
+## License
+
+MIT

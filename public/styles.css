@@ -638,6 +638,58 @@ summary:focus-visible {
   margin-top: 4px;
 }
 
+.investigation-decision {
+  margin-top: 22px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: var(--ink);
+  color: var(--surface);
+}
+
+.investigation-decision-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.investigation-decision-heading p {
+  margin: 0;
+  color: #b9c3bc;
+  font-size: 12px;
+}
+
+.investigation-decision-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0;
+  margin: 18px 0 0;
+  border-top: 1px solid #334039;
+}
+
+.investigation-decision-grid div {
+  padding: 16px 14px 0;
+  border-left: 1px solid #334039;
+}
+
+.investigation-decision-grid div:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.investigation-decision-grid dt {
+  color: #9eaaa2;
+  font-size: 11px;
+}
+
+.investigation-decision-grid dd {
+  margin: 6px 0 0;
+  color: var(--surface);
+  font-size: 13px;
+  font-weight: 750;
+}
+
 .rerun-button {
   margin-top: 20px;
 }
@@ -873,8 +925,19 @@ footer {
   .section-heading,
   .results-header,
   .controls-row,
+  .investigation-decision-heading,
   .agent-trace {
     flex-direction: column;
+  }
+
+  .investigation-decision-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .investigation-decision-grid div,
+  .investigation-decision-grid div:first-child {
+    padding: 14px 10px 0;
+    border-left: 0;
   }
 
   .controls-row {

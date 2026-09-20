@@ -1192,6 +1192,63 @@ function renderResult(payload) {
   renderActions(payload)
   renderSignals(payload)
 
+  const decisionPanel =
+    document.querySelector(
+      '#investigation-decision',
+    )
+
+  if (payload.dataMode === 'full') {
+    const decisionLabels = {
+      completed: {
+        inference: 'Activated',
+        agent: 'Complete',
+      },
+      not_needed: {
+        inference: 'Not needed',
+        agent: 'Not needed',
+      },
+      fallback: {
+        inference: 'Fallback activated',
+        agent: 'Fallback activated',
+      },
+      insufficient_context: {
+        inference: 'Insufficient context',
+        agent: 'Insufficient context',
+      },
+    }
+
+    const decision =
+      decisionLabels[
+        payload.agentStatus
+      ] ?? decisionLabels.fallback
+
+    document.querySelector(
+      '#decision-signals',
+    ).textContent = String(
+      payload.audit.candidates.length,
+    )
+
+    document.querySelector(
+      '#decision-inference',
+    ).textContent = decision.inference
+
+    document.querySelector(
+      '#decision-provider',
+    ).textContent = payload.poweredBy
+
+    document.querySelector(
+      '#decision-agent',
+    ).textContent = decision.agent
+
+    decisionPanel.classList.remove(
+      'hidden',
+    )
+  } else {
+    decisionPanel.classList.add(
+      'hidden',
+    )
+  }
+
   document.querySelector(
     '#trace-model',
   ).textContent =

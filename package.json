@@ -1,14 +1,15 @@
 {
-  "name": "orbio-starter",
+  "name": "leakscout",
   "version": "0.1.0",
   "private": true,
-  "description": "An example of building on an Orbio key. Not required reading, not a required stack.",
+  "description": "Autonomous business investigation for verified profit and operational leaks.",
   "type": "module",
   "packageManager": "pnpm@10.4.1",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
+    "start": "tsx src/leakscout/web/server.ts",
     "chat": "tsx src/examples/01-chat.ts",
     "tools": "tsx src/examples/02-tools.ts",
     "structured": "tsx src/examples/03-structured.ts",
