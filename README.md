@@ -4,7 +4,7 @@ LeakScout is an autonomous business investigation agent that identifies verified
 
 **Live demo:** https://leakscout-production-deaf.up.railway.app
 
-**First integration target: Shopswift**
+**ShopSwift is LeakScout's first live integration.**
 
 ## Architecture
 
@@ -15,13 +15,15 @@ Business data
     -> decision whether inference is worthwhile
     -> Orbio investigation
     -> prioritized actions
+    -> Orbio assistant brief and grounded merchant Q&A
 ```
 
 - **LeakScout** is the standalone intelligence engine and API.
-- **Shopswift** is the first integration and deployment target. This repository does not claim that integration is already live.
-- **Orbio** is the autonomous inference and investigation layer used when verified candidates provide enough context to justify it.
+- **ShopSwift** is LeakScout's first live integration.
+- **Orbio investigator** prioritizes verified findings when enough context exists.
+- **Orbio assistant** translates the latest verified report into plain business language and answers merchant questions grounded in that report.
 
-The core engineering principle is simple: **financial calculations are deterministic.** LeakScout's agent chooses what deserves attention, but it cannot create a candidate, invent a financial figure, or modify a value calculated by the analytics engine. If inference is unnecessary, lacks sufficient context, or fails, LeakScout returns an appropriate deterministic result.
+The core engineering principle is simple: **the deterministic engine calculates verified truth.** LeakScout's Orbio layers may prioritize, explain, and summarize that truth, but they cannot create a candidate, invent a financial figure or cause, or modify a value calculated by the analytics engine. If inference is unnecessary, lacks sufficient context, or fails, LeakScout's audit still returns an appropriate deterministic result.
 
 ## Audit modes
 
@@ -66,7 +68,7 @@ At least one CSV is required. Providing both activates full-audit eligibility; O
 
 ### `POST /api/integrations/shopswift/audit`
 
-Accepts normalized JSON from trusted server-to-server consumers such as Shopswift. This is an integration contract; it does not mean the Shopswift production integration is complete.
+Accepts normalized JSON from the trusted ShopSwift server-to-server integration.
 
 Authenticate with the server-side integration secret:
 
@@ -106,6 +108,60 @@ Example request:
 ```
 
 At least one non-empty dataset is required. Sales are limited to 10,000 rows, inventory to 5,000 rows, and the JSON body to 1 MB. Missing optional financial or stock values remain unknown. `currentStock: -1` means untracked stock; other negative stock values are rejected. Successful responses use the standard LeakScout execution shape: `dataMode`, `agentUsed`, `agentStatus`, `poweredBy`, `coverage`, `audit`, `report`, and `currencySemantics`.
+
+Audit execution metadata remains explicit: `agentUsed` and `agentStatus` describe whether the investigation ran, while `report.model` and `report.toolCalls` describe the report path used.
+
+### `POST /api/integrations/shopswift/brief`
+
+Creates one short merchant-facing AI Brief from sanitized, verified LeakScout context. It uses one Orbio request per call; integration consumers should cache the response for the corresponding report.
+
+```json
+{
+  "context": {
+    "currency": "NGN",
+    "status": "completed",
+    "dataMode": "full",
+    "verifiedSignalCount": 1,
+    "priorities": [
+      {
+        "candidateId": "C1",
+        "category": "sales_anomaly",
+        "title": "Classic Chicken Shawarma revenue declined",
+        "urgency": "this_week",
+        "impact": {
+          "value": 24000,
+          "currency": "NGN",
+          "type": "revenue_decline"
+        },
+        "evidence": ["Recent revenue is 24,000 below the previous run rate."],
+        "recommendedAction": "Check availability, pricing, promotions and demand before changing inventory."
+      }
+    ],
+    "limitations": ["The available data does not establish the cause."]
+  }
+}
+```
+
+The response contains `summary`, up to three `actions`, optional `watchFor`, `referencedCandidateIds`, and explicit execution metadata: `poweredBy: "Orbio"`, `model`, and `inferenceUsed: true`.
+
+### `POST /api/integrations/shopswift/chat`
+
+Answers one merchant question from the same sanitized verified context, with optional short conversation history:
+
+```json
+{
+  "context": { "...": "same strict verified context as the brief endpoint" },
+  "question": "Why are Classic Chicken Shawarma sales down?",
+  "history": [
+    { "role": "user", "content": "Which product needs attention first?" },
+    { "role": "assistant", "content": "Classic Chicken Shawarma is the first verified priority." }
+  ]
+}
+```
+
+The response contains `answer`, `referencedCandidateIds`, no more than three `suggestedQuestions`, and the same explicit Orbio execution metadata. Each question uses exactly one model request. Questions are limited to 1,000 characters, history to 8 messages with 1,000 characters per message, and assistant JSON bodies to 256 KB.
+
+Both assistant routes require the same server-side bearer `LEAKSCOUT_INTEGRATION_SECRET` as the audit route. Their schemas reject unknown fields and do not accept transactions, customer records, names, emails, phone numbers, addresses, bank data, or payment references. Invalid provider output, unknown candidate references, and numeric claims absent from the verified context are rejected instead of returned. If Orbio is unavailable, the endpoint returns a safe gateway error; deterministic audit findings remain available.
 
 ### `POST /api/demo`
 
@@ -157,7 +213,7 @@ pnpm lint
 node --check public/app.js
 ```
 
-The suite covers deterministic analytics, CSV and integration-JSON validation safeguards, authentication, agent-output validation, partial-data behavior, provider fallback, and API behavior. Provider calls are stubbed in HTTP tests, so the automated suite does not spend Orbio credits.
+The suite covers deterministic analytics, CSV and integration-JSON validation safeguards, authentication, agent-output validation, assistant grounding and bounds, partial-data behavior, provider fallback, and API behavior. Provider calls are mocked in assistant and HTTP tests, so the automated suite does not spend Orbio credits.
 
 ## Deployment
 

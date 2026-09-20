@@ -15,9 +15,20 @@ import {
   executeLeakScout,
   type LeakScoutExecution,
 } from './service.js'
-import { InputError } from '../errors.js'
+import { AssistantInferenceError, InputError } from '../errors.js'
 import { parseShopswiftAuditPayload } from '../integrations/shopswift.js'
 import type { InventoryRow, SalesRow } from '../types.js'
+import {
+  answerLeakScoutQuestion,
+  generateAiBrief,
+  parseBriefRequest,
+  parseChatRequest,
+  type AssistantMetadata,
+  type AiBrief,
+  type BriefRequest,
+  type ChatRequest,
+  type LeakScoutAssistantResponse,
+} from '../agent/assistant.js'
 
 type LeakScoutExecutor = (
   sales: SalesRow[],
@@ -30,6 +41,12 @@ type LeakScoutAppOptions = {
   production?: boolean
   integrationSecret?: string
   execute?: LeakScoutExecutor
+  generateBrief?: (
+    request: BriefRequest,
+  ) => Promise<AiBrief & AssistantMetadata>
+  answerChat?: (
+    request: ChatRequest,
+  ) => Promise<LeakScoutAssistantResponse & AssistantMetadata>
 }
 
 function secretsMatch(provided: string, expected: string): boolean {
@@ -46,6 +63,8 @@ export function createLeakScoutApp(
   const integrationSecret =
     options.integrationSecret ?? process.env.LEAKSCOUT_INTEGRATION_SECRET
   const execute = options.execute ?? executeLeakScout
+  const generateBrief = options.generateBrief ?? generateAiBrief
+  const answerChat = options.answerChat ?? answerLeakScoutQuestion
 
 app.disable('x-powered-by')
 
@@ -98,8 +117,31 @@ const integrationLimiter = rateLimit({
   legacyHeaders: false,
   skip: () => !isProduction,
   message: {
-    error: 'Integration audit limit reached. Please retry later.',
+    error: 'Integration request limit reached. Please retry later.',
   },
+})
+
+const integrationAuth: express.RequestHandler = (req, res, next) => {
+  const authorization = req.get('authorization')
+  const match = authorization?.match(/^Bearer\s+(.+)$/i)
+  const provided = match?.[1] ?? ''
+  const authenticated =
+    Boolean(integrationSecret) &&
+    Boolean(provided) &&
+    secretsMatch(provided, integrationSecret ?? '')
+
+  if (!authenticated) {
+    res.set('WWW-Authenticate', 'Bearer')
+    res.status(401).json({ error: 'Unauthorized.' })
+    return
+  }
+
+  next()
+}
+
+const assistantJson = express.json({
+  limit: '256kb',
+  type: 'application/json',
 })
 
 const upload = multer({
@@ -188,23 +230,7 @@ app.post(
 app.post(
   '/api/integrations/shopswift/audit',
   integrationLimiter,
-  (req, res, next) => {
-    const authorization = req.get('authorization')
-    const match = authorization?.match(/^Bearer\s+(.+)$/i)
-    const provided = match?.[1] ?? ''
-    const authenticated =
-      Boolean(integrationSecret) &&
-      Boolean(provided) &&
-      secretsMatch(provided, integrationSecret ?? '')
-
-    if (!authenticated) {
-      res.set('WWW-Authenticate', 'Bearer')
-      res.status(401).json({ error: 'Unauthorized.' })
-      return
-    }
-
-    next()
-  },
+  integrationAuth,
   express.json({
     limit: '1mb',
     type: 'application/json',
@@ -213,6 +239,30 @@ app.post(
     const { sales, inventory, currency } = parseShopswiftAuditPayload(req.body)
     const result = await execute(sales, inventory, currency)
     res.json(result)
+  },
+)
+
+app.post(
+  '/api/integrations/shopswift/brief',
+  integrationLimiter,
+  integrationAuth,
+  assistantJson,
+  async (req, res) => {
+    const request = parseBriefRequest(req.body)
+    const brief = await generateBrief(request)
+    res.json(brief)
+  },
+)
+
+app.post(
+  '/api/integrations/shopswift/chat',
+  integrationLimiter,
+  integrationAuth,
+  assistantJson,
+  async (req, res) => {
+    const request = parseChatRequest(req.body)
+    const answer = await answerChat(request)
+    res.json(answer)
   },
 )
 
@@ -337,7 +387,7 @@ app.use(
       error.type === 'entity.too.large'
 
     if (isBodyTooLarge) {
-      res.status(413).json({ error: 'JSON request body must be 1 MB or smaller.' })
+      res.status(413).json({ error: 'JSON request body is too large.' })
       return
     }
 
@@ -347,6 +397,11 @@ app.use(
           ? error.message
           : 'Request body contains malformed JSON.',
       })
+      return
+    }
+
+    if (error instanceof AssistantInferenceError) {
+      res.status(error.statusCode).json({ error: error.message })
       return
     }
 
