@@ -1805,3 +1805,76 @@ footer {
     font-size: 14px;
   }
 }
+
+
+/* MOBILE MENU ORBIO FOOTER FINAL */
+
+.mobile-menu-footer {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .mobile-orbio-pill {
+    display: none !important;
+  }
+
+  .nav {
+    min-height: 78px;
+    align-items: center;
+    padding-top: 0;
+  }
+
+  .mobile-menu nav {
+    position: fixed;
+    top: 78px;
+    left: 0;
+    right: 0;
+    bottom: 104px;
+    width: auto;
+    padding: 42px 24px 24px;
+    overflow-y: auto;
+    border: 0;
+    border-top: 1px solid var(--line);
+    border-radius: 0;
+    background:
+      radial-gradient(circle at top right, rgba(25, 164, 99, 0.08), transparent 24rem),
+      var(--bg);
+    box-shadow: none;
+    z-index: 100;
+  }
+
+  .mobile-menu nav a {
+    min-height: 70px;
+    display: flex;
+    align-items: center;
+    padding: 0;
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+    color: var(--ink);
+    font-size: 22px;
+    font-weight: 750;
+  }
+
+  .mobile-menu-footer {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 101;
+    padding: 18px 24px calc(18px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .mobile-menu[open] .mobile-menu-footer {
+    display: block;
+  }
+
+  .mobile-menu-orbio {
+    width: 100%;
+    min-height: 54px;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.88);
+    font-size: 15px;
+  }
+}
