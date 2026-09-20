@@ -10,6 +10,7 @@ export const PrioritySelectionSchema = z.object({
 export const AgentDecisionSchema = z.object({
   priorities: z
     .array(PrioritySelectionSchema)
+    .length(3)
     .describe('Exactly three distinct verified candidates.'),
 })
 

@@ -1,0 +1,503 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  />
+  <meta
+    name="description"
+    content="LeakScout finds where businesses are losing money and uses Orbio to prioritize what deserves attention."
+  />
+
+  <title>LeakScout — Find the money you're losing</title>
+
+  <link
+    rel="stylesheet"
+    href="/styles.css"
+  />
+</head>
+
+<body>
+  <div class="page-shell">
+    <header class="nav">
+      <a
+        class="brand"
+        href="/"
+        aria-label="LeakScout home"
+      >
+        <span class="brand-mark">L</span>
+        <span>LeakScout</span>
+      </a>
+
+      <div class="powered-pill">
+        <span class="pulse-dot"></span>
+        Powered by Orbio
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="eyebrow">
+          AUTONOMOUS PROFIT-LEAK INVESTIGATION
+        </div>
+
+        <h1>
+          Find where your business
+          <span>is losing money.</span>
+        </h1>
+
+        <p class="hero-copy">
+          LeakScout detects verified operational and financial signals,
+          quantifies measurable exposure, then uses an Orbio-powered agent
+          to investigate and prioritize what deserves attention.
+        </p>
+
+        <div class="hero-actions">
+          <a class="button primary" href="#audit-card">Run profit audit <span aria-hidden="true">→</span></a>
+          <button class="button secondary demo-trigger" type="button">Try demo business</button>
+          <span class="no-upload-note">No upload required · demo data uses NGN</span>
+        </div>
+
+        <div class="proof-row">
+          <div>
+            <strong>Deterministic</strong>
+            <span>financial analysis</span>
+          </div>
+
+          <div>
+            <strong>Agentic</strong>
+            <span>investigation</span>
+          </div>
+
+          <div>
+            <strong>Actionable</strong>
+            <span>merchant intelligence</span>
+          </div>
+        </div>
+
+        <p class="platform-note">
+          Built as an intelligence layer for commerce
+          platforms, POS systems and ERPs.
+        </p>
+      </section>
+
+      <section
+        class="audit-card"
+        id="audit-card"
+        aria-labelledby="audit-heading"
+      >
+        <div class="section-heading">
+          <div>
+            <span class="section-kicker">
+              PROFIT AUDIT
+            </span>
+
+            <h2 id="audit-heading">
+              Investigate your business
+            </h2>
+          </div>
+
+          <span class="privacy-note">
+            Files are processed in memory · not stored
+          </span>
+        </div>
+
+        <form id="audit-form">
+          <div class="upload-grid">
+            <label
+              class="upload-zone"
+              id="sales-zone"
+            >
+              <input
+                type="file"
+                id="sales-file"
+                name="sales"
+                accept=".csv,text/csv"
+              />
+
+              <span class="upload-icon">
+                CSV
+              </span>
+
+              <strong>Sales data</strong>
+
+              <span
+                class="file-label"
+                id="sales-label"
+              >
+                Drop sales.csv or click to browse
+              </span>
+
+              <small>
+                date · sku · product_name · quantity ·
+                unit_price · unit_cost
+              </small>
+
+              <span class="file-chip">
+                CSV · MAX 5 MB
+              </span>
+            </label>
+
+            <label
+              class="upload-zone"
+              id="inventory-zone"
+            >
+              <input
+                type="file"
+                id="inventory-file"
+                name="inventory"
+                accept=".csv,text/csv"
+              />
+
+              <span class="upload-icon">
+                CSV
+              </span>
+
+              <strong>Inventory data</strong>
+
+              <span
+                class="file-label"
+                id="inventory-label"
+              >
+                Drop inventory.csv or click to browse
+              </span>
+
+              <small>
+                sku · product_name · current_stock ·
+                unit_cost · lead_time_days
+              </small>
+
+              <span class="file-chip">
+                CSV · MAX 5 MB
+              </span>
+            </label>
+          </div>
+
+          <div
+            class="data-coverage-note"
+            id="data-coverage-note"
+          >
+            <strong>One dataset works.</strong>
+            Add both to unlock the full Orbio
+            investigation.
+          </div>
+
+          <div class="controls-row">
+            <div class="currency-control">
+              <label for="currency">
+                Currency of uploaded data
+              </label>
+
+              <select
+                id="currency"
+                name="currency"
+              >
+                <option value="NGN">NGN — Nigerian Naira (₦)</option>
+                <option value="USD">USD — US Dollar ($)</option>
+                <option value="GBP">GBP — British Pound (£)</option>
+                <option value="EUR">EUR — Euro (€)</option>
+                <option value="GHS">GHS — Ghanaian Cedi (GH₵)</option>
+                <option value="KES">KES — Kenyan Shilling (KSh)</option>
+                <option value="ZAR">ZAR — South African Rand (R)</option>
+                <option value="CAD">CAD — Canadian Dollar (CA$)</option>
+                <option value="AUD">AUD — Australian Dollar (A$)</option>
+                <option value="INR">INR — Indian Rupee (₹)</option>
+                <option value="JPY">JPY — Japanese Yen (¥)</option>
+                <option value="AED">AED — UAE Dirham</option>
+                <option value="SAR">SAR — Saudi Riyal</option>
+                <option value="CHF">CHF — Swiss Franc</option>
+                <option value="SGD">SGD — Singapore Dollar</option>
+                <option value="NZD">NZD — New Zealand Dollar</option>
+              </select>
+              <small class="currency-help">
+                Choose the currency already used in your files. This does not convert values or exchange rates.
+              </small>
+            </div>
+
+            <div class="action-buttons">
+              <div class="demo-action">
+                <button
+                  type="button"
+                  class="button secondary"
+                  id="demo-button"
+                >
+                  Try demo business
+                </button>
+
+                <small class="demo-helper">
+                  No upload required · NGN demo
+                </small>
+              </div>
+
+              <button
+                type="submit"
+                class="button primary"
+                id="audit-button"
+              >
+                <span id="audit-button-label">
+                  Run profit audit
+                </span>
+                <span>→</span>
+              </button>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      <section
+        class="investigation hidden"
+        id="investigation"
+        aria-live="polite"
+      >
+        <div class="spinner"></div>
+
+        <div>
+          <span class="section-kicker">
+            LEAKSCOUT IS INVESTIGATING
+          </span>
+
+          <h2 id="investigation-title">
+            Validating merchant data…
+          </h2>
+
+          <div class="progress-track">
+            <span id="progress-bar"></span>
+          </div>
+
+          <p id="investigation-detail">
+            Checking file structure and financial fields.
+          </p>
+        </div>
+      </section>
+
+      <section
+        class="results hidden"
+        id="results"
+        aria-live="polite"
+      >
+        <div class="results-header">
+          <div>
+            <span class="section-kicker">
+              LEAKSCOUT PROFIT AUDIT
+            </span>
+
+            <h2 id="report-headline"></h2>
+
+            <p id="report-summary"></p>
+          </div>
+
+          <div
+            class="agent-status"
+            id="agent-status"
+          ></div>
+        </div>
+
+        <div
+          class="coverage-banner hidden"
+          id="coverage-banner"
+        ></div>
+
+        <div
+          class="metrics-grid"
+          id="metrics-grid"
+        ></div>
+
+        <div class="results-layout">
+          <div>
+            <div class="subsection-heading">
+              <div>
+                <span
+                  class="section-kicker"
+                  id="priority-kicker"
+                >
+                  PRIORITIES
+                </span>
+
+                <h3 id="priority-heading">
+                  What needs attention
+                </h3>
+              </div>
+            </div>
+
+            <div
+              class="priority-list"
+              id="priority-list"
+            ></div>
+          </div>
+
+          <aside class="action-panel">
+            <span class="section-kicker">
+              ACTION PLAN
+            </span>
+
+            <h3>What to do next</h3>
+
+            <div
+              class="action-groups"
+              id="action-groups"
+            ></div>
+          </aside>
+        </div>
+
+        <details class="verified-signals">
+          <summary>
+            View all verified signals
+          </summary>
+
+          <div
+            class="signal-list"
+            id="signal-list"
+          ></div>
+        </details>
+
+        <div class="agent-trace">
+          <div>
+            <span class="section-kicker">
+              INVESTIGATION TRACE
+            </span>
+
+            <strong id="trace-model"></strong>
+          </div>
+
+          <div id="trace-tools"></div>
+        </div>
+
+        <button
+          type="button"
+          class="button secondary rerun-button"
+          id="rerun-button"
+        >
+          Run another audit
+        </button>
+      </section>
+
+      <section class="content-section" aria-labelledby="how-heading">
+        <div class="content-heading">
+          <span class="section-kicker">HOW LEAKSCOUT WORKS</span>
+          <h2 id="how-heading">Evidence first. Inference when it earns its place.</h2>
+          <p>Financial values stay in deterministic code. The agent works only with verified candidates.</p>
+        </div>
+        <div class="step-grid">
+          <article><span>01</span><h3>Detect</h3><p>Deterministic analytics identifies verified signals in business data.</p></article>
+          <article><span>02</span><h3>Quantify</h3><p>LeakScout calculates revenue, profit, inventory or operational exposure only when the data supports it.</p></article>
+          <article><span>03</span><h3>Investigate</h3><p>Orbio is invoked only when additional reasoning can improve prioritization.</p></article>
+          <article><span>04</span><h3>Act</h3><p>The business gets prioritized findings, evidence and concrete next steps.</p></article>
+        </div>
+      </section>
+
+      <section class="content-section split-section" aria-labelledby="investigates-heading">
+        <div class="content-heading">
+          <span class="section-kicker">WHAT LEAKSCOUT INVESTIGATES</span>
+          <h2 id="investigates-heading">Operational signals that can be verified.</h2>
+          <p>No invented leakage. No selling-price-as-cost shortcuts. Unknown values remain unknown.</p>
+        </div>
+        <div class="investigation-grid">
+          <span>Stockout risk</span><span>Margin compression</span><span>Dead inventory</span>
+          <span>Sales anomalies</span><span>Inventory health</span><span>Pricing structure</span>
+          <span>Operational data gaps</span>
+        </div>
+      </section>
+
+      <section class="content-section" aria-labelledby="modes-heading">
+        <div class="content-heading">
+          <span class="section-kicker">TWO ANALYSIS MODES</span>
+          <h2 id="modes-heading">Useful with partial data. Deeper with connected context.</h2>
+        </div>
+        <div class="mode-grid">
+          <article class="mode-card">
+            <span class="mode-label">PARTIAL CATALOGUE DATA</span>
+            <h3>Inventory Health</h3>
+            <p>Works with a catalogue or inventory export—even without sales.</p>
+            <ul>
+              <li>Stock, cost and lead-time coverage</li>
+              <li>Price range and median selling price</li>
+              <li>Availability and category concentration</li>
+              <li>Missing or duplicate identifiers</li>
+              <li>Readiness for deeper investigation</li>
+            </ul>
+            <small>Partial audits do not spend Orbio inference.</small>
+          </article>
+          <article class="mode-card featured">
+            <span class="mode-label">SALES + INVENTORY</span>
+            <h3>Profit Leak Investigation</h3>
+            <p>Uses richer operational context to detect and quantify supported findings.</p>
+            <ul>
+              <li>Revenue at risk</li>
+              <li>Margin compression</li>
+              <li>Dead inventory safeguards</li>
+              <li>Sales anomalies and stockout risk</li>
+              <li>Conditional Orbio prioritization</li>
+            </ul>
+            <small>Orbio runs only with sufficient verified candidates.</small>
+          </article>
+        </div>
+      </section>
+
+      <section class="content-section architecture-section" aria-labelledby="architecture-heading">
+        <div class="content-heading">
+          <span class="section-kicker">INTEGRATION ARCHITECTURE</span>
+          <h2 id="architecture-heading">One intelligence layer. Many business-data sources.</h2>
+          <p>LeakScout remains a standalone engine and API for commerce platforms, POS and ERP systems, e-commerce systems, CSV exports and future API integrations.</p>
+        </div>
+        <div class="architecture-visual" role="img" aria-label="LeakScout API connects Shopswift, POS and ERP, and e-commerce data to deterministic detection, an Orbio agent, and priorities and actions">
+          <div class="architecture-node root-node">LeakScout API</div>
+          <div class="connector-line" aria-hidden="true"></div>
+          <div class="source-nodes">
+            <div class="architecture-node">Shopswift</div>
+            <div class="architecture-node">POS / ERP</div>
+            <div class="architecture-node">E-commerce</div>
+          </div>
+          <div class="connector-line" aria-hidden="true"></div>
+          <div class="architecture-flow">
+            <div class="architecture-node">Deterministic detection</div><b>→</b>
+            <div class="architecture-node accent-node">Orbio agent</div><b>→</b>
+            <div class="architecture-node">Priorities + actions</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="content-section partner-section" aria-labelledby="shopswift-heading">
+        <div>
+          <span class="section-kicker">FIRST INTEGRATION: SHOPSWIFT</span>
+          <h2 id="shopswift-heading">A real commerce deployment path.</h2>
+        </div>
+        <div>
+          <p>LeakScout is being integrated into Shopswift's merchant analytics layer, bringing merchant operational data through deterministic analysis and Orbio investigation into actionable merchant intelligence.</p>
+          <p><strong>LeakScout is the intelligence product.</strong> Shopswift is the first distribution and deployment proof—not a dependency of the engine.</p>
+        </div>
+      </section>
+
+      <section class="content-section orbio-section" aria-labelledby="orbio-heading">
+        <div class="orbio-mark" aria-hidden="true">O</div>
+        <div>
+          <span class="section-kicker">WHY ORBIO MATTERS</span>
+          <h2 id="orbio-heading">Reasoning is reserved for the decisions that need it.</h2>
+          <p>LeakScout runs its deterministic engine first, producing verified candidates and fixed financial values. When there is enough context, Orbio investigates those candidates and selects what deserves attention. It cannot create a new financial finding or change a calculated number.</p>
+          <div class="cost-aware-row"><span>Deterministic first</span><span>Conditional inference</span><span>Bounded candidate IDs</span><span>Fallback included</span></div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <span>LeakScout</span>
+
+      <span>
+        Autonomous business intelligence powered by Orbio.
+      </span>
+    </footer>
+  </div>
+
+  <div
+    class="toast hidden"
+    id="toast"
+    role="alert"
+  ></div>
+
+  <script
+    src="/app.js"
+    defer
+  ></script>
+</body>
+</html>

@@ -11,6 +11,33 @@
 
 ---
 
+## LeakScout
+
+LeakScout is a standalone business-intelligence engine and API for finding verified operational and financial signals in sales and inventory data. Shopswift is its first integration target; Shopswift-specific behavior is handled by flexible input parsing, not embedded in the analytics engine.
+
+```bash
+pnpm leakscout:web   # http://localhost:3000
+pnpm test            # deterministic and API tests
+pnpm typecheck
+```
+
+API endpoints:
+
+- `GET /api/health` — service capabilities and currency semantics.
+- `POST /api/audit` — multipart CSV audit with optional `sales`, optional `inventory`, and `sourceCurrency` (at least one file is required).
+- `POST /api/demo` — bundled demo business, denominated in NGN.
+
+`sourceCurrency` describes the currency already used in the uploaded data. LeakScout does not perform FX conversion or relabel the bundled demo. The execution boundary is `executeLeakScout(...)`: it selects a sales-only, inventory-only, or full deterministic audit and invokes Orbio only when a full audit has enough verified candidates to prioritize.
+
+```text
+CSV / future adapter -> deterministic analytics -> verified candidate IDs
+                    -> conditional Orbio prioritization -> report + actions
+```
+
+All uploaded files are processed in memory. Financial calculations remain deterministic; the agent cannot create candidates or change calculated financial values.
+
+---
+
 Your Orbio key is an [OpenRouter](https://openrouter.ai) key, funded by the credits your `$ORBIO` earns. One key, every model, and everything else OpenRouter does — image and video generation, web search, PDFs, voice, sandboxed shells, subagents. This repo shows the shapes, in TypeScript, with nothing hidden.
 
 Use it as a reference, copy one file out of it, or ignore it and write Python. The competition has no rules about how; only that the key is yours.

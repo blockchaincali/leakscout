@@ -1,4 +1,5 @@
 import type { SalesRow } from '../types.js'
+import { InputError } from '../errors.js'
 
 export const DAY_MS = 86_400_000
 
@@ -39,7 +40,7 @@ export function validateCurrency(currency: string): string {
   const code = currency.trim().toUpperCase()
 
   if (!/^[A-Z]{3}$/.test(code)) {
-    throw new Error(
+    throw new InputError(
       `Invalid currency "${currency}". Use a 3-letter ISO currency code such as USD, GBP, EUR or NGN.`,
     )
   }
@@ -50,7 +51,7 @@ export function validateCurrency(currency: string): string {
       currency: code,
     }).format(1)
   } catch {
-    throw new Error(`Unsupported currency code: ${code}`)
+    throw new InputError(`Unsupported currency code: ${code}`)
   }
 
   return code

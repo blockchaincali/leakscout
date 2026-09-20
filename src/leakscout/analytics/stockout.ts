@@ -3,7 +3,11 @@ import type {
   LeakCandidate,
   SalesRow,
 } from '../types.js'
-import { latestSalesDate, withinPreviousDays } from './utils.js'
+import {
+  daysBetween,
+  latestSalesDate,
+  withinPreviousDays,
+} from './utils.js'
 
 export function findStockoutRisks(
   sales: SalesRow[],
@@ -14,10 +18,24 @@ export function findStockoutRisks(
   const recent = sales.filter((row) =>
     withinPreviousDays(row.date, latest, 30),
   )
+  const earliestRecent = new Date(
+    Math.min(...recent.map((row) => row.date.getTime())),
+  )
+  const observationDays = Math.min(
+    30,
+    daysBetween(earliestRecent, latest) + 1,
+  )
 
   const results: LeakCandidate[] = []
 
   for (const item of inventory) {
+    if (
+      item.stockKnown === false ||
+      item.leadTimeKnown === false
+    ) {
+      continue
+    }
+
     const productSales = recent.filter((row) => row.sku === item.sku)
     if (!productSales.length) continue
 
@@ -27,7 +45,7 @@ export function findStockoutRisks(
       0,
     )
 
-    const avgDailyUnits = units / 30
+    const avgDailyUnits = units / observationDays
     if (avgDailyUnits <= 0) continue
 
     const daysCover = item.currentStock / avgDailyUnits
@@ -53,7 +71,7 @@ export function findStockoutRisks(
       evidence: [
         `${daysCover.toFixed(1)} days of stock remaining`,
         `${item.leadTimeDays} day supplier lead time`,
-        `${avgDailyUnits.toFixed(1)} units sold per day over the last 30 days`,
+        `${avgDailyUnits.toFixed(1)} units sold per day across ${observationDays} observed day${observationDays === 1 ? '' : 's'}`,
       ],
       impact: {
         value: Math.round(revenueAtRisk),
@@ -67,6 +85,7 @@ export function findStockoutRisks(
         shortageUnits: Number(shortageUnits.toFixed(1)),
         avgDailyUnits: Number(avgDailyUnits.toFixed(2)),
         avgSellingPrice: Math.round(avgSellingPrice),
+        observationDays,
       },
     })
   }

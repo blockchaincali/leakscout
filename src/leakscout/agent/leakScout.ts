@@ -10,14 +10,19 @@ import type {
   LeakCategory,
 } from '../types.js'
 import { AgentDecisionSchema } from './schemas.js'
+import {
+  ALL_LEAK_CATEGORIES,
+  parseInvestigationCategories,
+  validatePrioritySelections,
+} from './validation.js'
 
-type CandidateWithId = LeakCandidate & {
+export type CandidateWithId = LeakCandidate & {
   id: string
 }
 
 type Urgency = 'today' | 'this_week' | 'monitor'
 
-type VerifiedPriority = {
+export type VerifiedPriority = {
   candidate: CandidateWithId
   reasoning: string
   recommendedAction: string
@@ -37,12 +42,7 @@ export type LeakScoutReport = {
   toolCalls: string[]
 }
 
-const ALL_CATEGORIES: LeakCategory[] = [
-  'stockout_risk',
-  'margin_compression',
-  'dead_inventory',
-  'sales_anomaly',
-]
+const ALL_CATEGORIES: LeakCategory[] = ALL_LEAK_CATEGORIES
 
 function withIds(candidates: LeakCandidate[]): CandidateWithId[] {
   return candidates.map((candidate, index) => ({
@@ -61,6 +61,8 @@ function categoryLabel(category: LeakCategory): string {
       return 'dead inventory'
     case 'sales_anomaly':
       return 'sales decline'
+    case 'inventory_exposure':
+      return 'inventory exposure'
   }
 }
 
@@ -81,6 +83,9 @@ function safeAction(candidate: CandidateWithId): string {
 
     case 'sales_anomaly':
       return 'Investigate availability, pricing, promotions and demand changes before changing inventory commitments.'
+
+    case 'inventory_exposure':
+      return 'Review recent movement and demand before increasing this inventory position.'
   }
 }
 
@@ -97,6 +102,9 @@ function monitorAction(candidate: CandidateWithId): string {
 
     case 'sales_anomaly':
       return `Monitor ${candidate.productName ?? candidate.sku ?? 'the product'} sales against its previous run rate.`
+
+    case 'inventory_exposure':
+      return `Monitor ${candidate.productName ?? candidate.sku ?? 'the product'} inventory movement before reordering.`
   }
 }
 
@@ -106,8 +114,18 @@ function dedupe(values: string[]): string[] {
 
 export async function runLeakScoutAgent(
   audit: AuditResult,
+  signal?: AbortSignal,
 ): Promise<LeakScoutReport> {
-  const candidates = withIds(audit.candidates)
+  const MAX_PER_CATEGORY = 8
+  const limitedCandidates = ALL_CATEGORIES.flatMap((category) =>
+    audit.candidates
+      .filter((candidate) => candidate.category === category)
+      .slice(0, MAX_PER_CATEGORY),
+  )
+  const included = new Set(limitedCandidates)
+  const candidates = withIds(
+    audit.candidates.filter((candidate) => included.has(candidate)),
+  )
 
   if (candidates.length < 3) {
     throw new Error(
@@ -126,6 +144,7 @@ export async function runLeakScoutAgent(
           'margin_compression',
           'dead_inventory',
           'sales_anomaly',
+          'inventory_exposure',
         ]),
       )
       .min(1)
@@ -177,13 +196,16 @@ Your final decision will contain candidate IDs and urgency only.
     },
   ]
 
-  const investigation = await openrouter.chat.completions.create({
-    model: DEFAULT_MODEL,
-    messages,
-    tools: [investigationTool],
-    tool_choice: 'required',
-    max_tokens: 500,
-  })
+  const investigation = await openrouter.chat.completions.create(
+    {
+      model: DEFAULT_MODEL,
+      messages,
+      tools: [investigationTool],
+      tool_choice: 'required',
+      max_tokens: 500,
+    },
+    { signal },
+  )
 
   const investigationMessage = investigation.choices[0]?.message
 
@@ -205,19 +227,24 @@ Your final decision will contain candidate IDs and urgency only.
     let categories: LeakCategory[] = ALL_CATEGORIES
 
     try {
-      const parsed = InvestigationArgs.parse(
-        JSON.parse(call.function.arguments || '{}'),
-      )
-      categories = parsed.categories
+      categories = parseInvestigationCategories(call.function.arguments)
     } catch {
-      // Compatibility fallback: if a provider emits malformed arguments,
-      // return all verified categories rather than spending another model call.
       categories = ALL_CATEGORIES
     }
 
-    const result = candidates.filter((candidate) =>
+    const requested = candidates.filter((candidate) =>
       categories.includes(candidate.category),
     )
+    const result = [...requested]
+
+    // Always return enough verified context for the final selection without
+    // paying for another investigation call.
+    if (result.length < 3) {
+      for (const candidate of candidates) {
+        if (!result.includes(candidate)) result.push(candidate)
+        if (result.length === 3) break
+      }
+    }
 
     for (const candidate of result) {
       inspectedCandidateIds.add(candidate.id)
@@ -241,31 +268,8 @@ Your final decision will contain candidate IDs and urgency only.
     })
   }
 
-  // If the model requested a narrow subset with fewer than 3 candidates,
-  // provide the complete verified candidate set locally without another
-  // inference round.
   if (inspectedCandidateIds.size < 3) {
-    for (const candidate of candidates) {
-      inspectedCandidateIds.add(candidate.id)
-    }
-
-    messages.push({
-      role: 'user',
-      content:
-        'The initial investigation returned fewer than three candidates. Here is the complete verified candidate set: ' +
-        JSON.stringify(
-          candidates.map((candidate) => ({
-            id: candidate.id,
-            category: candidate.category,
-            productName: candidate.productName,
-            title: candidate.title,
-            evidence: candidate.evidence,
-            impact: candidate.impact,
-            confidence: candidate.confidence,
-            metadata: candidate.metadata,
-          })),
-        ),
-    })
+    throw new Error('LeakScout did not inspect enough verified candidates.')
   }
 
   messages.push({
@@ -283,23 +287,26 @@ Do not provide financial calculations, recommendations, prose or new facts.
 `.trim(),
   })
 
-  const final = await openrouter.chat.completions.create({
-    model: DEFAULT_MODEL,
-    messages,
-    max_tokens: 300,
-    response_format: {
-      type: 'json_schema',
-      json_schema: {
-        name: 'leakscout_priority_decision',
-        strict: true,
-        schema: z.toJSONSchema(AgentDecisionSchema),
+  const final = await openrouter.chat.completions.create(
+    {
+      model: DEFAULT_MODEL,
+      messages,
+      max_tokens: 300,
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'leakscout_priority_decision',
+          strict: true,
+          schema: z.toJSONSchema(AgentDecisionSchema),
+        },
+      },
+      // @ts-expect-error OpenRouter provider extension.
+      provider: {
+        require_parameters: true,
       },
     },
-    // @ts-expect-error OpenRouter provider extension.
-    provider: {
-      require_parameters: true,
-    },
-  })
+    { signal },
+  )
 
   const content = final.choices[0]?.message?.content
 
@@ -309,48 +316,16 @@ Do not provide financial calculations, recommendations, prose or new facts.
 
   const decision = AgentDecisionSchema.parse(JSON.parse(content))
 
-  if (decision.priorities.length !== 3) {
-    throw new Error(
-      `Expected exactly 3 priorities, received ${decision.priorities.length}.`,
-    )
-  }
-
-  const seen = new Set<string>()
-
-  const priorities: VerifiedPriority[] = decision.priorities.map(
-    (selection) => {
-      if (seen.has(selection.candidateId)) {
-        throw new Error(
-          `Duplicate candidate selected: ${selection.candidateId}`,
-        )
-      }
-
-      seen.add(selection.candidateId)
-
-      const candidate = candidates.find(
-        (item) => item.id === selection.candidateId,
-      )
-
-      if (!candidate) {
-        throw new Error(
-          `Agent selected unknown candidate: ${selection.candidateId}`,
-        )
-      }
-
-      if (!inspectedCandidateIds.has(candidate.id)) {
-        throw new Error(
-          `Agent selected candidate it did not inspect: ${candidate.id}`,
-        )
-      }
-
-      return {
-        candidate,
-        reasoning: safeReason(candidate),
-        recommendedAction: safeAction(candidate),
-        urgency: selection.urgency,
-      }
-    },
-  )
+  const priorities: VerifiedPriority[] = validatePrioritySelections(
+    candidates,
+    decision.priorities,
+    inspectedCandidateIds,
+  ).map(({ candidate, urgency }) => ({
+    candidate,
+    reasoning: safeReason(candidate),
+    recommendedAction: safeAction(candidate),
+    urgency,
+  }))
 
   const categories = dedupe(
     priorities.map((priority) =>

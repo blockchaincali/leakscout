@@ -33,12 +33,18 @@ export function findMarginLeaks(
     const all = sales.filter((row) => row.sku === sku)
     const productName = all[0]?.productName ?? sku
 
-    const recentRows = all.filter((row) => {
+    // Margin analysis requires a known cost basis.
+    const rowsWithCost = all.filter(
+      (row) =>
+        row.unitCostKnown !== false,
+    )
+
+    const recentRows = rowsWithCost.filter((row) => {
       const diff = latestMs - row.date.getTime()
       return diff >= 0 && diff < 30 * DAY_MS
     })
 
-    const baselineRows = all.filter((row) => {
+    const baselineRows = rowsWithCost.filter((row) => {
       const diff = latestMs - row.date.getTime()
       return diff >= 30 * DAY_MS && diff < 60 * DAY_MS
     })

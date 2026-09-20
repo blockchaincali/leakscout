@@ -17,12 +17,18 @@
     "pdf": "tsx src/examples/06-pdf.ts",
     "agent": "tsx src/examples/07-agent.ts",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint ."
+    "test": "node --import tsx --test src/leakscout/tests/leakscout.test.ts",
+    "lint": "eslint .",
+    "leakscout:web": "tsx src/leakscout/web/server.ts",
+    "leakscout:audit": "tsx src/leakscout/test-audit.ts",
+    "leakscout:agent": "tsx src/leakscout/test-agent.ts"
   },
   "dependencies": {
     "csv-parse": "^7.0.2",
     "dotenv": "^17.2.1",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.7.0",
+    "helmet": "^8.3.0",
     "multer": "^2.4.0",
     "openai": "^5.20.0",
     "zod": "^4.1.5"

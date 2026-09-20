@@ -15,9 +15,20 @@ export function findDeadInventory(
   currency: string,
 ): LeakCandidate[] {
   const latest = latestSalesDate(sales)
+  const earliest = new Date(
+    Math.min(...sales.map((row) => row.date.getTime())),
+  )
+  const observationDays = daysBetween(earliest, latest) + 1
   const results: LeakCandidate[] = []
 
   for (const item of inventory) {
+    if (
+      item.stockKnown === false ||
+      item.unitCostKnown === false
+    ) {
+      continue
+    }
+
     if (item.currentStock <= 0) continue
 
     const productSales = sales
@@ -27,7 +38,7 @@ export function findDeadInventory(
     const lastSale = productSales[0]
     const daysSinceLastSale = lastSale
       ? daysBetween(lastSale.date, latest)
-      : 999
+      : observationDays
 
     if (daysSinceLastSale < 45) continue
 
@@ -42,7 +53,7 @@ export function findDeadInventory(
       evidence: [
         lastSale
           ? `No recorded sale for ${daysSinceLastSale} days`
-          : 'No recorded sales in the dataset',
+          : `No recorded sales during the ${observationDays}-day observation period`,
         `${item.currentStock} units currently in stock`,
         `Current unit cost is ${formatMoney(item.unitCost, currency)}`,
       ],
