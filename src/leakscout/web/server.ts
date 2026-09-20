@@ -4,20 +4,48 @@ import multer from 'multer'
 import { rateLimit } from 'express-rate-limit'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { createHash, timingSafeEqual } from 'node:crypto'
 import {
   loadInventoryCsv,
   loadSalesCsv,
   parseInventoryCsvText,
   parseSalesCsvText,
 } from '../analytics/parser.js'
-import { executeLeakScout } from './service.js'
+import {
+  executeLeakScout,
+  type LeakScoutExecution,
+} from './service.js'
 import { InputError } from '../errors.js'
+import { parseShopswiftAuditPayload } from '../integrations/shopswift.js'
+import type { InventoryRow, SalesRow } from '../types.js'
+
+type LeakScoutExecutor = (
+  sales: SalesRow[],
+  inventory: InventoryRow[],
+  currency: string,
+) => Promise<LeakScoutExecution>
+
+type LeakScoutAppOptions = {
+  root?: string
+  production?: boolean
+  integrationSecret?: string
+  execute?: LeakScoutExecutor
+}
+
+function secretsMatch(provided: string, expected: string): boolean {
+  const providedDigest = createHash('sha256').update(provided).digest()
+  const expectedDigest = createHash('sha256').update(expected).digest()
+  return timingSafeEqual(providedDigest, expectedDigest)
+}
 
 export function createLeakScoutApp(
-  options: { root?: string; production?: boolean } = {},
+  options: LeakScoutAppOptions = {},
 ) {
   const app = express()
   const root = options.root ?? process.cwd()
+  const integrationSecret =
+    options.integrationSecret ?? process.env.LEAKSCOUT_INTEGRATION_SECRET
+  const execute = options.execute ?? executeLeakScout
 
 app.disable('x-powered-by')
 
@@ -26,12 +54,6 @@ app.use(
     crossOriginResourcePolicy: {
       policy: 'same-origin',
     },
-  }),
-)
-
-app.use(
-  express.json({
-    limit: '100kb',
   }),
 )
 
@@ -66,6 +88,17 @@ const demoLimiter = rateLimit({
   message: {
     error:
       'Demo limit reached. Please wait a few minutes before running another Orbio investigation.',
+  },
+})
+
+const integrationLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => !isProduction,
+  message: {
+    error: 'Integration audit limit reached. Please retry later.',
   },
 })
 
@@ -142,12 +175,43 @@ app.post(
       )
 
     const result =
-      await executeLeakScout(
+      await execute(
         sales,
         inventory,
         'NGN',
       )
 
+    res.json(result)
+  },
+)
+
+app.post(
+  '/api/integrations/shopswift/audit',
+  integrationLimiter,
+  (req, res, next) => {
+    const authorization = req.get('authorization')
+    const match = authorization?.match(/^Bearer\s+(.+)$/i)
+    const provided = match?.[1] ?? ''
+    const authenticated =
+      Boolean(integrationSecret) &&
+      Boolean(provided) &&
+      secretsMatch(provided, integrationSecret ?? '')
+
+    if (!authenticated) {
+      res.set('WWW-Authenticate', 'Bearer')
+      res.status(401).json({ error: 'Unauthorized.' })
+      return
+    }
+
+    next()
+  },
+  express.json({
+    limit: '1mb',
+    type: 'application/json',
+  }),
+  async (req, res) => {
+    const { sales, inventory, currency } = parseShopswiftAuditPayload(req.body)
+    const result = await execute(sales, inventory, currency)
     res.json(result)
   },
 )
@@ -215,7 +279,7 @@ app.post(
         : []
 
     const result =
-      await executeLeakScout(
+      await execute(
         sales,
         inventory,
         currency,
@@ -266,6 +330,16 @@ app.use(
       error instanceof SyntaxError &&
       'status' in error &&
       error.status === 400
+
+    const isBodyTooLarge =
+      error instanceof Error &&
+      'type' in error &&
+      error.type === 'entity.too.large'
+
+    if (isBodyTooLarge) {
+      res.status(413).json({ error: 'JSON request body must be 1 MB or smaller.' })
+      return
+    }
 
     if (error instanceof InputError || isBadJson) {
       res.status(400).json({

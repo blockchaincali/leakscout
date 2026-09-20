@@ -19,6 +19,7 @@ import { findMarginLeaks } from '../analytics/margins.js'
 import { findSalesAnomalies } from '../analytics/anomalies.js'
 import { executeLeakScout } from '../web/service.js'
 import { createLeakScoutApp } from '../web/server.js'
+import { parseShopswiftAuditPayload } from '../integrations/shopswift.js'
 import type { InventoryRow, SalesRow } from '../types.js'
 import {
   parseInvestigationCategories,
@@ -332,9 +333,35 @@ test('agent input handling falls back safely and rejects invalid selections', ()
 
 let server: Server
 let baseUrl: string
+const integrationSecret = 'test-integration-secret'
+
+const integrationRequest = (
+  body: unknown,
+  authorization = `Bearer ${integrationSecret}`,
+) => fetch(`${baseUrl}/api/integrations/shopswift/audit`, {
+  method: 'POST',
+  headers: {
+    authorization,
+    'content-type': 'application/json',
+  },
+  body: JSON.stringify(body),
+})
 
 before(async () => {
-  server = createLeakScoutApp().listen(0, '127.0.0.1')
+  server = createLeakScoutApp({
+    integrationSecret,
+    execute: (sales, inventory, currency) => executeLeakScout(
+      sales,
+      inventory,
+      currency,
+      {
+        // Automated tests must never make paid provider calls.
+        runAgent: async () => {
+          throw new Error('Simulated provider failure')
+        },
+      },
+    ),
+  }).listen(0, '127.0.0.1')
   await once(server, 'listening')
   const address = server.address() as AddressInfo
   baseUrl = `http://127.0.0.1:${address.port}`
@@ -353,6 +380,184 @@ test('health endpoint exposes a clean integration contract', async () => {
   assert.equal(body.ok, true)
   assert.equal(body.service, 'LeakScout')
   assert.equal(body.currencySemantics, 'source_accounting_currency')
+})
+
+test('Shopswift integration accepts an authenticated full JSON audit', async () => {
+  const response = await integrationRequest({
+    currency: 'ngn',
+    sales: [{
+      date: '2026-03-01T10:30:00Z',
+      sku: 'COF-1',
+      productName: 'Coffee',
+      quantity: 2,
+      sellingPrice: 1000,
+      unitCost: 700,
+    }],
+    inventory: [{
+      sku: 'COF-1',
+      productName: 'Coffee',
+      currentStock: 10,
+      unitCost: 700,
+      sellingPrice: 1000,
+      supplierLeadTimeDays: 5,
+      category: 'Drinks',
+      available: true,
+    }],
+  })
+  const body = await response.json() as {
+    dataMode: string
+    agentUsed: boolean
+    agentStatus: string
+    poweredBy: string
+    currencySemantics: string
+    audit: { summary: { currency: string; revenue: number } }
+    report: unknown
+    coverage: unknown
+  }
+
+  assert.equal(response.status, 200)
+  assert.equal(body.dataMode, 'full')
+  assert.equal(body.agentUsed, false)
+  assert.equal(body.agentStatus, 'not_needed')
+  assert.equal(body.poweredBy, 'Orbio')
+  assert.equal(body.currencySemantics, 'source_accounting_currency')
+  assert.equal(body.audit.summary.currency, 'NGN')
+  assert.equal(body.audit.summary.revenue, 2000)
+  assert.ok(body.report)
+  assert.ok(body.coverage)
+})
+
+test('Shopswift integration supports inventory-only and preserves unknown stock and cost', async () => {
+  const response = await integrationRequest({
+    currency: 'NGN',
+    inventory: [{
+      sku: 'COF-1',
+      productName: 'Coffee',
+      currentStock: -1,
+      sellingPrice: 1000,
+    }],
+  })
+  const body = await response.json() as {
+    dataMode: string
+    agentUsed: boolean
+    audit: {
+      summary: {
+        inventoryValue?: number
+        inventoryDataQuality: { stockKnown: number; unitCostKnown: number }
+      }
+    }
+  }
+
+  assert.equal(response.status, 200)
+  assert.equal(body.dataMode, 'inventory_only')
+  assert.equal(body.agentUsed, false)
+  assert.equal(body.audit.summary.inventoryDataQuality.stockKnown, 0)
+  assert.equal(body.audit.summary.inventoryDataQuality.unitCostKnown, 0)
+  assert.equal(body.audit.summary.inventoryValue, undefined)
+})
+
+test('Shopswift integration supports sales-only data with unknown unit cost', async () => {
+  const response = await integrationRequest({
+    currency: 'USD',
+    sales: [{
+      date: '2026-03-01',
+      barcode: '12345',
+      quantity: 2,
+      sellingPrice: 12.5,
+    }],
+  })
+  const body = await response.json() as {
+    dataMode: string
+    currencySemantics: string
+    audit: { summary: { currency: string; salesDataQuality: { unitCostKnown: number } } }
+  }
+
+  assert.equal(response.status, 200)
+  assert.equal(body.dataMode, 'sales_only')
+  assert.equal(body.audit.summary.currency, 'USD')
+  assert.equal(body.audit.summary.salesDataQuality.unitCostKnown, 0)
+  assert.equal(body.currencySemantics, 'source_accounting_currency')
+})
+
+test('Shopswift integration rejects missing and incorrect credentials', async () => {
+  const payload = { currency: 'NGN', inventory: [{ sku: 'A', currentStock: 1 }] }
+  const missing = await fetch(`${baseUrl}/api/integrations/shopswift/audit`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  const wrong = await integrationRequest(payload, 'Bearer wrong-secret')
+
+  assert.equal(missing.status, 401)
+  assert.equal(wrong.status, 401)
+  assert.equal((await missing.json() as { error: string }).error, 'Unauthorized.')
+  assert.equal((await wrong.json() as { error: string }).error, 'Unauthorized.')
+})
+
+test('Shopswift integration rejects malformed JSON, empty data and invalid values', async () => {
+  const malformed = await fetch(`${baseUrl}/api/integrations/shopswift/audit`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${integrationSecret}`,
+      'content-type': 'application/json',
+    },
+    body: '{bad json',
+  })
+  const empty = await integrationRequest({ currency: 'NGN', sales: [], inventory: [] })
+  const invalidNumber = await integrationRequest({
+    currency: 'NGN',
+    inventory: [{ sku: 'A', currentStock: -2 }],
+  })
+  const invalidMoney = await integrationRequest({
+    currency: 'NGN',
+    sales: [{ date: '2026-03-01', sku: 'A', quantity: 1, sellingPrice: 'NaN' }],
+  })
+  const invalidDate = await integrationRequest({
+    currency: 'NGN',
+    sales: [{ date: '2026-02-30', sku: 'A', quantity: 1, sellingPrice: 10 }],
+  })
+
+  assert.equal(malformed.status, 400)
+  assert.equal(empty.status, 400)
+  assert.equal(invalidNumber.status, 400)
+  assert.equal(invalidMoney.status, 400)
+  assert.equal(invalidDate.status, 400)
+})
+
+test('Shopswift JSON normalization never substitutes selling price for unit cost', () => {
+  const parsed = parseShopswiftAuditPayload({
+    currency: 'NGN',
+    inventory: [{ sku: 'A', currentStock: 2, sellingPrice: 1000 }],
+  })
+
+  assert.equal(parsed.inventory[0].sellingPrice, 1000)
+  assert.equal(parsed.inventory[0].unitCost, 0)
+  assert.equal(parsed.inventory[0].unitCostKnown, false)
+})
+
+test('Shopswift endpoint returns deterministic fallback when the provider fails', async () => {
+  const response = await integrationRequest({
+    currency: 'USD',
+    sales: [
+      { date: '2026-01-01', sku: 'OLD', productName: 'Old', quantity: 1, sellingPrice: 100, unitCost: 20 },
+      { date: '2026-02-10', sku: 'SKU-1', productName: 'Widget', quantity: 400, sellingPrice: 10, unitCost: 5 },
+      { date: '2026-03-01', sku: 'SKU-1', productName: 'Widget', quantity: 10, sellingPrice: 10, unitCost: 8 },
+    ],
+    inventory: [
+      { sku: 'SKU-1', productName: 'Widget', currentStock: 1, unitCost: 5, sellingPrice: 10, supplierLeadTimeDays: 10 },
+      { sku: 'OLD', productName: 'Old', currentStock: 20, unitCost: 20, sellingPrice: 100, supplierLeadTimeDays: 2 },
+    ],
+  })
+  const body = await response.json() as {
+    agentStatus: string
+    agentUsed: boolean
+    audit: { candidates: unknown[] }
+  }
+
+  assert.equal(response.status, 200)
+  assert.ok(body.audit.candidates.length >= 3)
+  assert.equal(body.agentStatus, 'fallback')
+  assert.equal(body.agentUsed, false)
 })
 
 test('audit API validates missing files and malformed input', async () => {
@@ -401,4 +606,15 @@ test('audit API rejects invalid source currency', async () => {
 
   const response = await fetch(`${baseUrl}/api/audit`, { method: 'POST', body: form })
   assert.equal(response.status, 400)
+})
+
+test('existing demo and CSV audit routes remain available without integration auth', async () => {
+  const demo = await fetch(`${baseUrl}/api/demo`, { method: 'POST' })
+
+  const form = new FormData()
+  form.append('inventory', new Blob(['sku,product name,stock\nA,Alpha,1']), 'inventory.csv')
+  const audit = await fetch(`${baseUrl}/api/audit`, { method: 'POST', body: form })
+
+  assert.equal(demo.status, 200)
+  assert.equal(audit.status, 200)
 })

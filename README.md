@@ -64,6 +64,49 @@ Runs an uploaded audit. Send `multipart/form-data` with:
 
 At least one CSV is required. Providing both activates full-audit eligibility; Orbio is still invoked only when the deterministic result contains enough verified candidates.
 
+### `POST /api/integrations/shopswift/audit`
+
+Accepts normalized JSON from trusted server-to-server consumers such as Shopswift. This is an integration contract; it does not mean the Shopswift production integration is complete.
+
+Authenticate with the server-side integration secret:
+
+```http
+Authorization: Bearer <LEAKSCOUT_INTEGRATION_SECRET>
+Content-Type: application/json
+```
+
+Example request:
+
+```json
+{
+  "currency": "NGN",
+  "sales": [
+    {
+      "date": "2026-03-01T10:30:00Z",
+      "sku": "COF-1",
+      "productName": "Coffee",
+      "quantity": 2,
+      "sellingPrice": 1000,
+      "unitCost": 700
+    }
+  ],
+  "inventory": [
+    {
+      "sku": "COF-1",
+      "productName": "Coffee",
+      "currentStock": 10,
+      "unitCost": 700,
+      "sellingPrice": 1000,
+      "supplierLeadTimeDays": 5,
+      "category": "Drinks",
+      "available": true
+    }
+  ]
+}
+```
+
+At least one non-empty dataset is required. Sales are limited to 10,000 rows, inventory to 5,000 rows, and the JSON body to 1 MB. Missing optional financial or stock values remain unknown. `currentStock: -1` means untracked stock; other negative stock values are rejected. Successful responses use the standard LeakScout execution shape: `dataMode`, `agentUsed`, `agentStatus`, `poweredBy`, `coverage`, `audit`, `report`, and `currencySemantics`.
+
 ### `POST /api/demo`
 
 Runs the bundled full-audit demo using the NGN-denominated sample sales and inventory data.
@@ -94,12 +137,16 @@ OPENROUTER_MODEL=google/gemini-2.5-flash-lite
 # Optional OpenRouter application attribution.
 APP_NAME=LeakScout
 APP_URL=http://localhost:3000
+
+# Required for trusted server-to-server integrations.
+LEAKSCOUT_INTEGRATION_SECRET=replace-with-a-long-random-secret
 ```
 
 - `OPENROUTER_API_KEY`: the Orbio-issued inference key used through OpenRouter. Never commit a real key.
 - `OPENROUTER_MODEL`: model used by the investigation layer. If omitted, the code's configured default is used.
 - `APP_NAME`: application name sent for OpenRouter attribution.
 - `APP_URL`: application URL sent for OpenRouter attribution.
+- `LEAKSCOUT_INTEGRATION_SECRET`: shared secret required by integration routes. Keep it server-side and send it only in the `Authorization` bearer header.
 
 ## Automated tests
 
@@ -110,7 +157,7 @@ pnpm lint
 node --check public/app.js
 ```
 
-The suite covers deterministic analytics, CSV parsing safeguards, agent-output validation, partial-data behavior, and API behavior.
+The suite covers deterministic analytics, CSV and integration-JSON validation safeguards, authentication, agent-output validation, partial-data behavior, provider fallback, and API behavior. Provider calls are stubbed in HTTP tests, so the automated suite does not spend Orbio credits.
 
 ## Deployment
 
@@ -121,7 +168,7 @@ pnpm install --frozen-lockfile
 pnpm start
 ```
 
-The server reads the platform-provided `PORT` environment variable and serves both the UI and API. Configure the four environment variables above in the deployment platform; keep `OPENROUTER_API_KEY` secret. The production deployment currently runs on Railway at https://leakscout-production-deaf.up.railway.app.
+The server reads the platform-provided `PORT` environment variable and serves both the UI and API. Configure the environment variables above in the deployment platform; keep `OPENROUTER_API_KEY` and `LEAKSCOUT_INTEGRATION_SECRET` secret. The production deployment currently runs on Railway at https://leakscout-production-deaf.up.railway.app.
 
 ## Attribution
 

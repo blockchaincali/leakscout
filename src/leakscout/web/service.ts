@@ -36,6 +36,13 @@ export type LeakScoutExecution = {
   }
 }
 
+export type LeakScoutExecutionOptions = {
+  runAgent?: (
+    audit: AuditResult,
+    signal: AbortSignal,
+  ) => Promise<LeakScoutReport>
+}
+
 function actionFor(
   candidate: LeakCandidate,
 ): string {
@@ -371,6 +378,7 @@ export async function executeLeakScout(
   sales: SalesRow[],
   inventory: InventoryRow[],
   currency: string,
+  options: LeakScoutExecutionOptions = {},
 ): Promise<LeakScoutExecution> {
   const hasSales = sales.length > 0
   const hasInventory =
@@ -459,9 +467,10 @@ export async function executeLeakScout(
 
     activeInvestigations += 1
     investigationSlotAcquired = true
-    const { runLeakScoutAgent } = await import('../agent/leakScout.js')
+    const runAgent = options.runAgent ??
+      (await import('../agent/leakScout.js')).runLeakScoutAgent
     const report = await withTimeout(
-      (signal) => runLeakScoutAgent(audit, signal),
+      (signal) => runAgent(audit, signal),
       25_000,
     )
 
