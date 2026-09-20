@@ -2096,3 +2096,56 @@ footer {
 .audit-actions #audit-button {
   min-width: 220px;
 }
+
+
+/* FINAL BALANCED AUDIT CONTROLS */
+
+.controls-row {
+  align-items: flex-end;
+}
+
+.demo-currency-control {
+  width: min(320px, 100%);
+}
+
+.demo-currency-control select {
+  width: 100%;
+  height: 48px;
+}
+
+.action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.action-buttons .button {
+  min-height: 48px;
+}
+
+.action-buttons #audit-button {
+  min-width: 190px;
+}
+
+.audit-actions {
+  width: auto;
+  justify-content: initial;
+}
+
+@media (max-width: 620px) {
+  .demo-currency-control,
+  .demo-currency-control select,
+  .action-buttons {
+    width: 100%;
+  }
+
+  .action-buttons {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .action-buttons .button {
+    width: 100%;
+  }
+}
