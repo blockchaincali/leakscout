@@ -2084,3 +2084,15 @@ footer {
     height: 9px;
   }
 }
+
+
+/* AUDIT CONTROLS CLEANUP */
+
+.audit-actions {
+  width: 100%;
+  justify-content: flex-end;
+}
+
+.audit-actions #audit-button {
+  min-width: 220px;
+}

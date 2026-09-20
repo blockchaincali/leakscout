@@ -7,7 +7,6 @@ const salesLabel = document.querySelector('#sales-label')
 const inventoryLabel = document.querySelector('#inventory-label')
 const salesZone = document.querySelector('#sales-zone')
 const inventoryZone = document.querySelector('#inventory-zone')
-const currencyInput = document.querySelector('#currency')
 const demoCurrencyInput = document.querySelector('#demo-currency')
 const demoButton = document.querySelector('#demo-button')
 const demoTriggers = document.querySelectorAll('.demo-trigger')
@@ -1369,9 +1368,8 @@ async function runUploadAudit(
   }
 
   body.append(
-    'sourceCurrency',
-    currencyInput.value ||
-      'NGN',
+    "sourceCurrency",
+    "USD",
   )
 
   setBusy(true, mode)
