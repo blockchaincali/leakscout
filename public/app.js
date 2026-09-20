@@ -1546,3 +1546,13 @@ assistantForm?.addEventListener('submit', async (event) => {
     }
   }
 })
+
+
+// Close mobile navigation after selection
+const mobileMenu = document.querySelector(".mobile-menu")
+
+for (const link of document.querySelectorAll(".mobile-menu nav a")) {
+  link.addEventListener("click", () => {
+    if (mobileMenu) mobileMenu.open = false
+  })
+}

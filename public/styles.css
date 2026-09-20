@@ -1736,3 +1736,72 @@ footer {
 .leakscout-chat-launcher:hover {
   background: var(--surface);
 }
+
+
+/* LEAKSCOUT NAV REFINEMENT */
+
+.nav {
+  position: relative;
+}
+
+@media (min-width: 761px) {
+  .top-nav {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    margin: 0;
+    gap: 28px;
+  }
+
+  .nav-actions {
+    margin-left: auto;
+  }
+}
+
+
+/* LEAKSCOUT MOBILE FULL MENU */
+
+@media (max-width: 760px) {
+  .mobile-menu nav {
+    position: fixed;
+    top: 78px;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    padding: 42px 24px 32px;
+    border: 0;
+    border-top: 1px solid var(--line);
+    border-radius: 0;
+    background:
+      radial-gradient(circle at top right, rgba(25, 164, 99, 0.08), transparent 24rem),
+      var(--bg);
+    box-shadow: none;
+    z-index: 100;
+  }
+
+  .mobile-menu nav a {
+    display: flex;
+    align-items: center;
+    min-height: 66px;
+    padding: 0;
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+    font-size: 22px;
+    font-weight: 750;
+    letter-spacing: -0.025em;
+  }
+
+  .mobile-menu nav a:hover {
+    background: transparent;
+    color: var(--accent-dark);
+  }
+
+  .mobile-menu nav a:last-child {
+    margin-top: 20px;
+    min-height: 48px;
+    border-bottom: 0;
+    color: var(--accent-dark);
+    font-size: 14px;
+  }
+}
