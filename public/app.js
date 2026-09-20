@@ -1556,3 +1556,14 @@ for (const link of document.querySelectorAll(".mobile-menu nav a")) {
     if (mobileMenu) mobileMenu.open = false
   })
 }
+
+
+// Premium mobile navigation state
+const premiumMobileMenu = document.querySelector(".mobile-menu")
+
+premiumMobileMenu?.addEventListener("toggle", () => {
+  document.body.classList.toggle(
+    "mobile-nav-open",
+    premiumMobileMenu.open,
+  )
+})
