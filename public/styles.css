@@ -61,23 +61,17 @@ button {
 }
 
 .brand {
-  color: var(--ink);
   display: inline-flex;
-  gap: 10px;
   align-items: center;
+  flex-shrink: 0;
+  padding: 8px 0;
   text-decoration: none;
-  font-weight: 800;
-  letter-spacing: -0.02em;
 }
 
-.brand-mark {
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  background: var(--ink);
-  color: white;
-  border-radius: 10px;
+.brand-logo {
+  display: block;
+  width: clamp(138px, 16vw, 156px);
+  height: auto;
 }
 
 .powered-pill,
