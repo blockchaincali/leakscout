@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
+  answerPublicLeakScoutQuestion,
   answerLeakScoutQuestion,
   generateAiBrief,
   parseChatRequest,
+  parsePublicAssistantRequest,
   type AssistantCompletion,
   type BriefRequest,
   type ChatRequest,
@@ -225,6 +227,73 @@ test('Ask LeakScout rejects invalid references and provider failure safely', asy
     (error: unknown) => {
       assert.ok(error instanceof AssistantInferenceError)
       assert.doesNotMatch(JSON.stringify(error), /secret-token-value/)
+      return true
+    },
+  )
+})
+
+test('public assistant validates a strict, trimmed 500-character question', () => {
+  assert.deepEqual(
+    parsePublicAssistantRequest({ question: '  What does LeakScout do?  ' }),
+    { question: 'What does LeakScout do?' },
+  )
+  assert.throws(
+    () => parsePublicAssistantRequest({ question: '   ' }),
+    InputError,
+  )
+  assert.throws(
+    () => parsePublicAssistantRequest({ question: 'x'.repeat(501) }),
+    InputError,
+  )
+  assert.throws(
+    () => parsePublicAssistantRequest({
+      question: 'What does LeakScout do?',
+      merchantData: { revenue: 1 },
+    }),
+    InputError,
+  )
+})
+
+test('public assistant uses one bounded product-grounded completion', async () => {
+  let calls = 0
+  const result = await answerPublicLeakScoutQuestion(
+    { question: 'How does Orbio power LeakScout?' },
+    {
+      complete: async (request) => {
+        calls += 1
+        assert.equal(request.maxTokens, 350)
+        assert.match(request.system, /deterministic code/i)
+        assert.match(request.system, /never pretend/i)
+        assert.doesNotMatch(request.user, /merchantData|customer|payment/i)
+        return {
+          content: JSON.stringify({
+            answer:
+              'Orbio helps prioritize and explain verified signals; deterministic code keeps financial figures fixed.',
+          }),
+          model: 'test/model',
+        }
+      },
+    },
+  )
+
+  assert.equal(calls, 1)
+  assert.equal(result.poweredBy, 'Orbio')
+  assert.match(result.answer, /deterministic code/i)
+})
+
+test('public assistant hides provider failures and never fabricates an answer', async () => {
+  await assert.rejects(
+    answerPublicLeakScoutQuestion(
+      { question: 'What does LeakScout do?' },
+      {
+        complete: async () => {
+          throw new Error('private-provider-token')
+        },
+      },
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof AssistantInferenceError)
+      assert.doesNotMatch(JSON.stringify(error), /private-provider-token/)
       return true
     },
   )

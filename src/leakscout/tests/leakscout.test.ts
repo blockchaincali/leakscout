@@ -383,6 +383,15 @@ const assistantRequest = (
   body: JSON.stringify(body),
 })
 
+const publicAssistantRequest = (body: unknown) =>
+  fetch(`${baseUrl}/api/public/assistant`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  })
+
 before(async () => {
   server = createLeakScoutApp({
     integrationSecret,
@@ -424,6 +433,15 @@ before(async () => {
         inferenceUsed: true,
       }
     },
+    answerPublic: async (request) => {
+      if (request.question === 'fail') throw new AssistantInferenceError()
+
+      return {
+        answer:
+          'LeakScout analyses sales and inventory data to find supported profit-leak signals.',
+        poweredBy: 'Orbio',
+      }
+    },
   }).listen(0, '127.0.0.1')
   await once(server, 'listening')
   const address = server.address() as AddressInfo
@@ -443,6 +461,40 @@ test('health endpoint exposes a clean integration contract', async () => {
   assert.equal(body.ok, true)
   assert.equal(body.service, 'LeakScout')
   assert.equal(body.currencySemantics, 'source_accounting_currency')
+})
+
+test('public assistant rejects empty, oversized and extra input', async () => {
+  const empty = await publicAssistantRequest({ question: '   ' })
+  const oversized = await publicAssistantRequest({ question: 'x'.repeat(501) })
+  const extra = await publicAssistantRequest({
+    question: 'What does LeakScout do?',
+    customers: [{ email: 'private@example.com' }],
+  })
+
+  assert.equal(empty.status, 400)
+  assert.equal(oversized.status, 400)
+  assert.equal(extra.status, 400)
+})
+
+test('public assistant returns the mocked Orbio answer without auth', async () => {
+  const response = await publicAssistantRequest({
+    question: '  What does LeakScout do?  ',
+  })
+  const body = await response.json() as Record<string, unknown>
+
+  assert.equal(response.status, 200)
+  assert.match(String(body.answer), /sales and inventory data/i)
+  assert.equal(body.poweredBy, 'Orbio')
+  assert.deepEqual(Object.keys(body).sort(), ['answer', 'poweredBy'])
+})
+
+test('public assistant provider failure returns a safe 503', async () => {
+  const response = await publicAssistantRequest({ question: 'fail' })
+  const body = await response.json() as { error: string }
+
+  assert.equal(response.status, 503)
+  assert.equal(body.error, 'The LeakScout assistant is temporarily unavailable.')
+  assert.doesNotMatch(JSON.stringify(body), /provider|token|secret/i)
 })
 
 test('Shopswift integration accepts an authenticated full JSON audit', async () => {

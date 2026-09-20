@@ -19,15 +19,19 @@ import { AssistantInferenceError, InputError } from '../errors.js'
 import { parseShopswiftAuditPayload } from '../integrations/shopswift.js'
 import type { InventoryRow, SalesRow } from '../types.js'
 import {
+  answerPublicLeakScoutQuestion,
   answerLeakScoutQuestion,
   generateAiBrief,
   parseBriefRequest,
   parseChatRequest,
+  parsePublicAssistantRequest,
   type AssistantMetadata,
   type AiBrief,
   type BriefRequest,
   type ChatRequest,
   type LeakScoutAssistantResponse,
+  type PublicAssistantRequest,
+  type PublicAssistantResponse,
 } from '../agent/assistant.js'
 
 type LeakScoutExecutor = (
@@ -47,6 +51,9 @@ type LeakScoutAppOptions = {
   answerChat?: (
     request: ChatRequest,
   ) => Promise<LeakScoutAssistantResponse & AssistantMetadata>
+  answerPublic?: (
+    request: PublicAssistantRequest,
+  ) => Promise<PublicAssistantResponse>
 }
 
 function secretsMatch(provided: string, expected: string): boolean {
@@ -65,6 +72,8 @@ export function createLeakScoutApp(
   const execute = options.execute ?? executeLeakScout
   const generateBrief = options.generateBrief ?? generateAiBrief
   const answerChat = options.answerChat ?? answerLeakScoutQuestion
+  const answerPublic =
+    options.answerPublic ?? answerPublicLeakScoutQuestion
 
 app.disable('x-powered-by')
 
@@ -121,6 +130,18 @@ const integrationLimiter = rateLimit({
   },
 })
 
+const publicAssistantLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 8,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => !isProduction,
+  message: {
+    error:
+      'Assistant limit reached. Please wait a few minutes before asking another question.',
+  },
+})
+
 const integrationAuth: express.RequestHandler = (req, res, next) => {
   const authorization = req.get('authorization')
   const match = authorization?.match(/^Bearer\s+(.+)$/i)
@@ -141,6 +162,11 @@ const integrationAuth: express.RequestHandler = (req, res, next) => {
 
 const assistantJson = express.json({
   limit: '256kb',
+  type: 'application/json',
+})
+
+const publicAssistantJson = express.json({
+  limit: '4kb',
   type: 'application/json',
 })
 
@@ -191,6 +217,24 @@ app.get(
       ],
       currencySemantics: 'source_accounting_currency',
     })
+  },
+)
+
+app.post(
+  '/api/public/assistant',
+  publicAssistantLimiter,
+  publicAssistantJson,
+  async (req, res) => {
+    const request = parsePublicAssistantRequest(req.body)
+
+    try {
+      const answer = await answerPublic(request)
+      res.json(answer)
+    } catch {
+      res.status(503).json({
+        error: 'The LeakScout assistant is temporarily unavailable.',
+      })
+    }
   },
 )
 

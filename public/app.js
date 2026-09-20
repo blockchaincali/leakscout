@@ -1404,3 +1404,145 @@ rerunButton.addEventListener(
 )
 
 updateAuditModeUI()
+
+
+// ── Public Ask LeakScout assistant ───────────────────────────────────────────
+
+const assistantLauncher = document.querySelector('#leakscout-chat-launcher')
+const assistantPanel = document.querySelector('#leakscout-chat-panel')
+const assistantClose = document.querySelector('#assistant-close')
+const assistantForm = document.querySelector('#assistant-form')
+const assistantQuestion = document.querySelector('#assistant-question')
+const assistantSend = document.querySelector('#assistant-send')
+const assistantBody = document.querySelector('#assistant-body')
+const assistantSuggestions = document.querySelectorAll('#assistant-suggestions button')
+
+function setAssistantOpen(open) {
+  assistantPanel.classList.toggle('hidden', !open)
+  assistantLauncher.setAttribute('aria-expanded', String(open))
+
+  if (open) {
+    window.setTimeout(() => {
+      if (!assistantPanel.classList.contains('hidden')) {
+        assistantQuestion.focus()
+      }
+    }, 80)
+  } else {
+    assistantLauncher.focus()
+  }
+}
+
+function appendAssistantMessage(role, content) {
+  const wrapper = document.createElement('div')
+  wrapper.className =
+    role === 'user'
+      ? 'assistant-message assistant-message-user'
+      : 'assistant-message assistant-message-ai'
+
+  if (role === 'assistant') {
+    const label = document.createElement('strong')
+    label.textContent = 'LeakScout'
+    wrapper.append(label)
+  }
+
+  const text = document.createElement('p')
+  text.textContent = content
+  wrapper.append(text)
+
+  assistantBody.append(wrapper)
+  assistantBody.scrollTop = assistantBody.scrollHeight
+}
+
+assistantLauncher?.addEventListener('click', () => {
+  setAssistantOpen(assistantPanel.classList.contains('hidden'))
+})
+
+assistantClose?.addEventListener('click', () => {
+  setAssistantOpen(false)
+})
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !assistantPanel?.classList.contains('hidden')) {
+    setAssistantOpen(false)
+  }
+})
+
+for (const cta of document.querySelectorAll('.assistant-cta')) {
+  cta.addEventListener('click', () => setAssistantOpen(false))
+}
+
+for (const suggestion of assistantSuggestions) {
+  suggestion.addEventListener('click', () => {
+    assistantQuestion.value = suggestion.textContent ?? ''
+    assistantQuestion.focus()
+  })
+}
+
+assistantQuestion?.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+    event.preventDefault()
+    assistantForm.requestSubmit()
+  }
+})
+
+assistantForm?.addEventListener('submit', async (event) => {
+  event.preventDefault()
+
+  const question = assistantQuestion.value.trim()
+
+  if (!question || assistantSend.disabled) return
+
+  appendAssistantMessage('user', question)
+
+  assistantQuestion.value = ''
+  assistantSend.disabled = true
+  assistantBody.setAttribute('aria-busy', 'true')
+
+  const thinking = document.createElement('div')
+  thinking.className = 'assistant-message assistant-message-ai'
+  thinking.textContent = 'LeakScout is thinking…'
+  assistantBody.append(thinking)
+  assistantBody.scrollTop = assistantBody.scrollHeight
+
+  try {
+    const response = await fetch('/api/public/assistant', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ question }),
+    })
+
+    const payload = await response.json().catch(() => ({}))
+
+    thinking.remove()
+
+    if (!response.ok) {
+      throw new Error(
+        payload.error ??
+          'LeakScout could not answer right now.',
+      )
+    }
+
+    if (typeof payload.answer !== 'string' || !payload.answer.trim()) {
+      throw new Error('LeakScout could not answer right now.')
+    }
+
+    appendAssistantMessage('assistant', payload.answer)
+  } catch (error) {
+    thinking.remove()
+
+    appendAssistantMessage(
+      'assistant',
+      error instanceof Error
+        ? error.message
+        : 'LeakScout could not answer right now.',
+    )
+  } finally {
+    assistantSend.disabled = false
+    assistantBody.removeAttribute('aria-busy')
+    if (!assistantPanel.classList.contains('hidden')) {
+      assistantQuestion.focus()
+    }
+  }
+})
