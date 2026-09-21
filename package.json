@@ -18,11 +18,12 @@
     "pdf": "tsx src/examples/06-pdf.ts",
     "agent": "tsx src/examples/07-agent.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test src/leakscout/tests/leakscout.test.ts src/leakscout/tests/assistant.test.ts src/leakscout/tests/agent.test.ts src/leakscout/tests/embed.test.ts",
+    "test": "node --import tsx --test src/leakscout/tests/leakscout.test.ts src/leakscout/tests/assistant.test.ts src/leakscout/tests/agent.test.ts src/leakscout/tests/embed.test.ts src/leakscout/tests/providerErrors.test.ts",
     "lint": "eslint .",
     "leakscout:web": "tsx src/leakscout/web/server.ts",
     "leakscout:audit": "tsx src/leakscout/test-audit.ts",
-    "leakscout:agent": "tsx src/leakscout/test-agent.ts"
+    "leakscout:agent": "tsx src/leakscout/test-agent.ts",
+    "leakscout:provider-check": "tsx src/leakscout/provider-healthcheck.ts"
   },
   "dependencies": {
     "csv-parse": "^7.0.2",

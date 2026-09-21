@@ -2,6 +2,12 @@ import { z } from 'zod'
 import type OpenAI from 'openai'
 import { AssistantInferenceError, InputError } from '../errors.js'
 import { LEAKSCOUT_MODELS, LEAKSCOUT_TIMEOUTS_MS } from '../../lib/modelConfig.js'
+import {
+  classifyProviderError,
+  createProviderDiagnostic,
+  logProviderDiagnostic,
+  type ProviderDiagnostic,
+} from '../../lib/providerErrors.js'
 
 const MAX_ASSISTANT_TOKENS = 650
 const MAX_PUBLIC_ASSISTANT_TOKENS = 350
@@ -314,6 +320,8 @@ function assertGroundedOutput(
   output: { referencedCandidateIds: string[] },
   text: string,
   context: VerifiedLeakScoutContext,
+  feature: string,
+  model: string,
 ): void {
   const validIds = new Set(
     context.priorities.map((priority) => priority.candidateId),
@@ -321,7 +329,10 @@ function assertGroundedOutput(
 
   for (const id of output.referencedCandidateIds) {
     if (!validIds.has(id)) {
-      throw new AssistantInferenceError()
+      throw new AssistantInferenceError(
+        undefined,
+        createProviderDiagnostic('grounding_failure', { feature, model }),
+      )
     }
   }
 
@@ -329,13 +340,40 @@ function assertGroundedOutput(
   const outputNumbers = numericFacts(text)
   for (const number of outputNumbers) {
     if (!allowedNumbers.has(number)) {
-      throw new AssistantInferenceError()
+      throw new AssistantInferenceError(
+        undefined,
+        createProviderDiagnostic('grounding_failure', { feature, model }),
+      )
     }
   }
 }
 
+function diagnosticForAssistantFailure(
+  error: unknown,
+  feature: string,
+  model: string,
+): ProviderDiagnostic {
+  const context = { feature, model }
+  if (error instanceof AssistantInferenceError && error.diagnostic) {
+    return createProviderDiagnostic(
+      error.diagnostic.classification,
+      context,
+      error.diagnostic,
+    )
+  }
+  return classifyProviderError(error, context)
+}
+
+function structuredFailure(feature: string, model: string): AssistantInferenceError {
+  return new AssistantInferenceError(
+    undefined,
+    createProviderDiagnostic('structured_output_failure', { feature, model }),
+  )
+}
+
 async function infer<T>(
   context: VerifiedLeakScoutContext,
+  feature: string,
   model: string,
   timeoutMs: number,
   schema: z.ZodType<T>,
@@ -362,25 +400,28 @@ async function infer<T>(
       new Promise<AssistantCompletionResult>((_resolve, reject) => {
         timer = setTimeout(() => {
           controller.abort()
-          reject(new AssistantInferenceError())
+          reject(new AssistantInferenceError(
+            undefined,
+            createProviderDiagnostic('provider_timeout', { feature, model }),
+          ))
         }, timeoutMs)
       }),
     ])
 
-    if (!result.content) throw new AssistantInferenceError()
+    if (!result.content) throw structuredFailure(feature, model)
 
     let decoded: unknown
     try {
       decoded = JSON.parse(result.content)
     } catch {
-      throw new AssistantInferenceError()
+      throw structuredFailure(feature, model)
     }
 
     const parsed = schema.safeParse(decoded)
-    if (!parsed.success) throw new AssistantInferenceError()
+    if (!parsed.success) throw structuredFailure(feature, model)
 
     const grounded = parsed.data as T & { referencedCandidateIds: string[] }
-    assertGroundedOutput(grounded, textFromOutput(parsed.data), context)
+    assertGroundedOutput(grounded, textFromOutput(parsed.data), context, feature, model)
 
     return {
       ...parsed.data,
@@ -389,8 +430,9 @@ async function infer<T>(
       inferenceUsed: true,
     }
   } catch (error) {
-    if (error instanceof AssistantInferenceError) throw error
-    throw new AssistantInferenceError()
+    const diagnostic = diagnosticForAssistantFailure(error, feature, model)
+    logProviderDiagnostic(diagnostic)
+    throw new AssistantInferenceError(undefined, diagnostic)
   } finally {
     if (timer) clearTimeout(timer)
   }
@@ -403,6 +445,7 @@ export async function generateAiBrief(
   const parsed = parseBriefRequest(request)
   return infer(
     parsed.context,
+    'brief',
     LEAKSCOUT_MODELS.brief,
     LEAKSCOUT_TIMEOUTS_MS.brief,
     briefOutputSchema,
@@ -423,6 +466,7 @@ export async function answerLeakScoutQuestion(
   const parsed = parseChatRequest(request)
   return infer(
     parsed.context,
+    'merchant_chat',
     LEAKSCOUT_MODELS.chat,
     LEAKSCOUT_TIMEOUTS_MS.chat,
     chatOutputSchema,
@@ -463,30 +507,41 @@ export async function answerPublicLeakScoutQuestion(
       new Promise<AssistantCompletionResult>((_resolve, reject) => {
         timer = setTimeout(() => {
           controller.abort()
-          reject(new AssistantInferenceError())
+          reject(new AssistantInferenceError(
+            undefined,
+            createProviderDiagnostic('provider_timeout', {
+              feature: 'public_assistant',
+              model: LEAKSCOUT_MODELS.publicAssistant,
+            }),
+          ))
         }, LEAKSCOUT_TIMEOUTS_MS.publicAssistant)
       }),
     ])
 
-    if (!result.content) throw new AssistantInferenceError()
+    if (!result.content) throw structuredFailure('public_assistant', LEAKSCOUT_MODELS.publicAssistant)
 
     let decoded: unknown
     try {
       decoded = JSON.parse(result.content)
     } catch {
-      throw new AssistantInferenceError()
+      throw structuredFailure('public_assistant', LEAKSCOUT_MODELS.publicAssistant)
     }
 
     const output = publicAssistantOutputSchema.safeParse(decoded)
-    if (!output.success) throw new AssistantInferenceError()
+    if (!output.success) throw structuredFailure('public_assistant', LEAKSCOUT_MODELS.publicAssistant)
 
     return {
       answer: output.data.answer,
       poweredBy: 'Orbio',
     }
   } catch (error) {
-    if (error instanceof AssistantInferenceError) throw error
-    throw new AssistantInferenceError()
+    const diagnostic = diagnosticForAssistantFailure(
+      error,
+      'public_assistant',
+      LEAKSCOUT_MODELS.publicAssistant,
+    )
+    logProviderDiagnostic(diagnostic)
+    throw new AssistantInferenceError(undefined, diagnostic)
   } finally {
     if (timer) clearTimeout(timer)
   }

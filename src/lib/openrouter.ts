@@ -20,9 +20,13 @@ if (!apiKey) {
   )
 }
 
+export const OPENROUTER_BASE_URL = (
+  process.env.OPENROUTER_BASE_URL ?? 'https://api.orbio.so/api/v1'
+).replace(/\/+$/, '')
+
 export const openrouter = new OpenAI({
   apiKey,
-  baseURL: 'https://api.orbio.so/api/v1',
+  baseURL: OPENROUTER_BASE_URL,
   defaultHeaders: {
     'HTTP-Referer': process.env.APP_URL ?? 'https://orbio.so/build',
     'X-Title': process.env.APP_NAME ?? 'Orbio Build Week',
@@ -31,7 +35,7 @@ export const openrouter = new OpenAI({
 
 /** Raw fetch against the same base, for endpoints the SDK does not model. */
 export const openrouterFetch = (path: string, init: RequestInit = {}) =>
-  fetch(`https://api.orbio.so/api/v1${path}`, {
+  fetch(`${OPENROUTER_BASE_URL}${path}`, {
     ...init,
     headers: {
       authorization: `Bearer ${apiKey}`,

@@ -1,6 +1,6 @@
 /* global URL, document, CustomEvent, AbortController, fetch, customElements */
 
-export const LEAKSCOUT_ASSISTANT_VERSION = '1.0.0'
+export const LEAKSCOUT_ASSISTANT_VERSION = '1.0.1'
 
 const PUBLIC_DEFAULTS = {
   title: 'Ask LeakScout',
@@ -125,12 +125,18 @@ export class LeakScoutAssistant extends HTMLElementBase {
     if (typeof this.attachShadow !== 'function') return
     this.attachShadow({ mode: 'open' })
     this._build()
-    this._configure()
+    this._built = true
   }
 
   connectedCallback() {
+    if (!this._built) {
+      this._build()
+      this._built = true
+    }
+    this._connected = true
     this._configure()
     this._syncViewport()
+    if (this._listenersInstalled) return
     globalThis.visualViewport?.addEventListener('resize', this._viewportHandler)
     globalThis.visualViewport?.addEventListener('scroll', this._viewportHandler)
     this._mobileQuery?.addEventListener?.('change', this._viewportHandler)
@@ -141,20 +147,23 @@ export class LeakScoutAssistant extends HTMLElementBase {
       }
     }
     this.addEventListener('keydown', this._onKeydown)
+    this._listenersInstalled = true
   }
 
   disconnectedCallback() {
+    this._connected = false
     this._requestController?.abort()
     this._requestGeneration += 1
     globalThis.visualViewport?.removeEventListener('resize', this._viewportHandler)
     globalThis.visualViewport?.removeEventListener('scroll', this._viewportHandler)
     this._mobileQuery?.removeEventListener?.('change', this._viewportHandler)
     this.removeEventListener('keydown', this._onKeydown)
+    this._listenersInstalled = false
     this._unlockPageScroll()
   }
 
   attributeChangedCallback() {
-    this._configure()
+    if (this._built && this._connected) this._configure()
   }
 
   set suggestions(value) {
@@ -167,6 +176,7 @@ export class LeakScoutAssistant extends HTMLElementBase {
   }
 
   _build() {
+    if (this._built) return
     const root = this.shadowRoot
     const stylesheet = node('link')
     stylesheet.rel = 'stylesheet'

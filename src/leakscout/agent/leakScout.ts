@@ -4,6 +4,11 @@ import type {
   ChatCompletionTool,
 } from 'openai/resources/chat/completions'
 import { LEAKSCOUT_MODELS, LEAKSCOUT_TIMEOUTS_MS } from '../../lib/modelConfig.js'
+import {
+  classifyProviderError,
+  createProviderDiagnostic,
+  logProviderDiagnostic,
+} from '../../lib/providerErrors.js'
 import type {
   AuditResult,
   LeakCandidate,
@@ -208,6 +213,7 @@ async function completeWithTimeout(
   complete: AgentCompletion,
   request: Omit<AgentCompletionRequest, 'signal'> & { signal?: AbortSignal },
   timeoutMs: number,
+  completedModelTrace: string[],
 ): Promise<AgentCompletionResult> {
   const controller = new AbortController()
   const abortFromParent = () => controller.abort(request.signal?.reason)
@@ -221,25 +227,62 @@ async function completeWithTimeout(
       new Promise<AgentCompletionResult>((_resolve, reject) => {
         timer = setTimeout(() => {
           controller.abort(new Error(`${request.role} stage timed out`))
-          reject(new Error(`LeakScout ${request.role} stage timed out.`))
+          const timeoutError = new Error(`LeakScout ${request.role} stage timed out.`)
+          timeoutError.name = 'TimeoutError'
+          reject(timeoutError)
         }, timeoutMs)
       }),
     ])
+  } catch (error) {
+    logProviderDiagnostic(classifyProviderError(error, {
+      feature: request.role,
+      model: request.model,
+      completedModelTrace,
+    }))
+    throw error
   } finally {
     if (timer) clearTimeout(timer)
     request.signal?.removeEventListener('abort', abortFromParent)
   }
 }
 
-function decodeReport(result: AgentCompletionResult) {
-  if (!result.content) throw new Error('Model returned no structured report.')
+function logStageFailure(
+  classification: 'structured_output_failure' | 'grounding_failure',
+  role: ModelRole,
+  model: string,
+  completedModelTrace: string[],
+): void {
+  logProviderDiagnostic(createProviderDiagnostic(classification, {
+    feature: role,
+    model,
+    completedModelTrace,
+  }))
+}
+
+function decodeReport(
+  result: AgentCompletionResult,
+  role: ModelRole,
+  requestedModel: string,
+  completedModelTrace: string[],
+) {
+  const model = actualModel(result, requestedModel)
+  if (!result.content) {
+    logStageFailure('structured_output_failure', role, model, completedModelTrace)
+    throw new Error('Model returned no structured report.')
+  }
   let decoded: unknown
   try {
     decoded = JSON.parse(result.content)
   } catch {
+    logStageFailure('structured_output_failure', role, model, completedModelTrace)
     throw new Error('Model returned invalid JSON.')
   }
-  return InvestigationReportSchema.parse(decoded)
+  const parsed = InvestigationReportSchema.safeParse(decoded)
+  if (!parsed.success) {
+    logStageFailure('structured_output_failure', role, model, completedModelTrace)
+    throw new Error('Model returned an invalid investigation report.')
+  }
+  return parsed.data
 }
 
 function numericFacts(value: unknown): Set<number> {
@@ -399,13 +442,29 @@ export async function runLeakScoutAgent(
       tools: [scoutTool],
       maxTokens: 700,
       signal,
-    }, LEAKSCOUT_TIMEOUTS_MS.scout)
+    }, LEAKSCOUT_TIMEOUTS_MS.scout, trace.map(({ role }) => role))
 
     const scoutCall = scout.toolCalls?.find((call) => call.name === 'inspect_verified_leaks')
-    if (!scoutCall) throw new Error('Scout did not call inspect_verified_leaks.')
-    const selection = parseScoutToolArgs(scoutCall.arguments)
-    const inspected = validateCandidateIds(candidates, selection.candidateIds)
+    if (!scoutCall) {
+      logStageFailure('structured_output_failure', 'scout', actualModel(scout, scoutModel), trace.map(({ role }) => role))
+      throw new Error('Scout did not call inspect_verified_leaks.')
+    }
+    let selection
+    try {
+      selection = parseScoutToolArgs(scoutCall.arguments)
+    } catch {
+      logStageFailure('structured_output_failure', 'scout', actualModel(scout, scoutModel), trace.map(({ role }) => role))
+      throw new Error('Scout returned invalid inspection arguments.')
+    }
+    let inspected: CandidateWithId[]
+    try {
+      inspected = validateCandidateIds(candidates, selection.candidateIds)
+    } catch {
+      logStageFailure('grounding_failure', 'scout', actualModel(scout, scoutModel), trace.map(({ role }) => role))
+      throw new Error('Scout selected an unverified candidate.')
+    }
     if (inspected.some((candidate) => !selection.categories.includes(candidate.category))) {
+      logStageFailure('grounding_failure', 'scout', actualModel(scout, scoutModel), trace.map(({ role }) => role))
       throw new Error('Scout selected a candidate outside its declared categories.')
     }
     const inspectedIds = new Set(inspected.map((candidate) => candidate.id))
@@ -432,8 +491,13 @@ export async function runLeakScoutAgent(
       schema: InvestigationReportSchema,
       maxTokens: 2_800,
       signal,
-    }, LEAKSCOUT_TIMEOUTS_MS.investigator)
-    const investigatorDraft = decodeReport(investigatorResult)
+    }, LEAKSCOUT_TIMEOUTS_MS.investigator, trace.map(({ role }) => role))
+    const investigatorDraft = decodeReport(
+      investigatorResult,
+      'investigator',
+      investigatorModel,
+      trace.map(({ role }) => role),
+    )
     trace.push({ role: 'investigator', model: actualModel(investigatorResult, investigatorModel) })
 
     const criticModel = modelFor('critic')
@@ -464,14 +528,24 @@ export async function runLeakScoutAgent(
         schema: InvestigationReportSchema,
         maxTokens: 2_800,
         signal,
-      }, LEAKSCOUT_TIMEOUTS_MS.critic)
-      const validatedCritic = decodeReport(criticResult)
-      validateReportGrounding(
-        validatedCritic,
-        { summary: audit.summary, candidates },
-        candidates,
-        new Set(candidates.map((candidate) => candidate.id)),
+      }, LEAKSCOUT_TIMEOUTS_MS.critic, trace.map(({ role }) => role))
+      const validatedCritic = decodeReport(
+        criticResult,
+        'critic',
+        criticModel,
+        trace.map(({ role }) => role),
       )
+      try {
+        validateReportGrounding(
+          validatedCritic,
+          { summary: audit.summary, candidates },
+          candidates,
+          new Set(candidates.map((candidate) => candidate.id)),
+        )
+      } catch {
+        logStageFailure('grounding_failure', 'critic', actualModel(criticResult, criticModel), trace.map(({ role }) => role))
+        throw new Error('Critic report failed deterministic grounding.')
+      }
       criticReport = validatedCritic
       trace.push({ role: 'critic', model: actualModel(criticResult, criticModel) })
     } catch (error) {
@@ -492,6 +566,7 @@ export async function runLeakScoutAgent(
         inspectedIds,
       )
     } catch (investigatorError) {
+      logStageFailure('grounding_failure', 'investigator', actualModel(investigatorResult, investigatorModel), trace.map(({ role }) => role))
       const reason = investigatorError instanceof Error
         ? investigatorError.message
         : 'Investigator draft failed local grounding.'

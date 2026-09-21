@@ -5,6 +5,7 @@ import { test } from 'node:test'
 /* eslint-disable @typescript-eslint/no-explicit-any -- lightweight browser DOM test doubles */
 
 class FakeElement {
+  static constructing = false
   attributes = new Map<string, string>()
   children: FakeElement[] = []
   listeners = new Map<string, Array<(event: any) => void>>()
@@ -26,9 +27,17 @@ class FakeElement {
   scrollHeight = 100
   style: any = {
     overflow: '', height: '', values: {} as Record<string, string>,
-    setProperty(name: string, value: string) { this.values[name] = value },
+    setProperty: (name: string, value: string) => {
+      this.style.values[name] = value
+      this.setAttribute('style', '[component styles]')
+    },
   }
-  dataset: Record<string, string> = {}
+  dataset: Record<string, string> = new Proxy({}, {
+    set: (_target, name, value) => {
+      this.setAttribute(`data-${String(name).replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`, String(value))
+      return true
+    },
+  })
   shadowRoot: FakeElement | null = null
   classList = { add: (name: string) => { this.className += ` ${name}` } }
 
@@ -43,11 +52,27 @@ class FakeElement {
       this.children.push(child)
     }
   }
+  appendChild(child: FakeElement) {
+    this.append(child)
+    ;(child as any).isConnected = true
+    ;(child as any).connectedCallback?.()
+    return child
+  }
   replaceChildren(...children: FakeElement[]) {
     this.children = []
     this.append(...children)
   }
-  setAttribute(name: string, value: string) { this.attributes.set(name, value) }
+  setAttribute(name: string, value: string) {
+    const registered = [...registeredElements.values()].find((ElementClass) => this instanceof ElementClass)
+    if (FakeElement.constructing && registered) {
+      throw new DOMException('The result must not have attributes', 'NotSupportedError')
+    }
+    const previous = this.attributes.get(name) ?? null
+    this.attributes.set(name, value)
+    if (registered?.observedAttributes.includes(name)) {
+      ;(this as any).attributeChangedCallback?.(name, previous, value)
+    }
+  }
   removeAttribute(name: string) { this.attributes.delete(name) }
   getAttribute(name: string) { return this.attributes.get(name) ?? null }
   addEventListener(name: string, listener: (event: any) => void) {
@@ -94,15 +119,25 @@ const fakeDocument = {
   body: new FakeElement(),
   documentElement: new FakeElement(),
   activeElement: null as FakeElement | null,
-  createElement: () => new FakeElement(),
+  createElement: (tag: string) => {
+    const ElementClass = registeredElements.get(tag)
+    if (!ElementClass) return new FakeElement()
+    FakeElement.constructing = true
+    try {
+      return new ElementClass()
+    } finally {
+      FakeElement.constructing = false
+    }
+  },
 }
-const registeredElements = new Map<string, new () => FakeElement>()
+type FakeCustomElementConstructor = (new () => FakeElement) & { observedAttributes: string[] }
+const registeredElements = new Map<string, FakeCustomElementConstructor>()
 Object.defineProperties(globalThis, {
   HTMLElement: { configurable: true, value: FakeElement },
   CustomEvent: { configurable: true, value: FakeCustomEvent },
   customElements: {
     configurable: true,
-    value: { get: (name: string) => registeredElements.get(name), define: (name: string, constructor: new () => FakeElement) => registeredElements.set(name, constructor) },
+    value: { get: (name: string) => registeredElements.get(name), define: (name: string, constructor: FakeCustomElementConstructor) => registeredElements.set(name, constructor) },
   },
   document: { configurable: true, value: fakeDocument },
   matchMedia: { configurable: true, value: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }) },
@@ -111,14 +146,13 @@ Object.defineProperties(globalThis, {
 const {
   buildRequestPayload,
   normalizeResponse,
+  LEAKSCOUT_ASSISTANT_VERSION,
 } = await import('../../../public/embed/leakscout-assistant.js')
 
 function makeWidget(attributes: Record<string, string> = {}) {
-  const Widget = registeredElements.get('leakscout-assistant')
-  assert.ok(Widget)
-  const widget = new Widget() as FakeElement & Record<string, any>
+  const widget = fakeDocument.createElement('leakscout-assistant') as FakeElement & Record<string, any>
   for (const [name, value] of Object.entries(attributes)) widget.setAttribute(name, value)
-  widget.connectedCallback()
+  fakeDocument.body.appendChild(widget)
   return widget
 }
 
@@ -198,6 +232,7 @@ test('widget assets enforce safe rendering, private configuration boundaries and
     readFile(pageScriptUrl, 'utf8'),
   ])
   assert.match(script, /LEAKSCOUT_ASSISTANT_VERSION/)
+  assert.equal(LEAKSCOUT_ASSISTANT_VERSION, '1.0.1')
   assert.match(script, /textContent/)
   assert.doesNotMatch(script, /innerHTML/)
   assert.doesNotMatch(script, /LEAKSCOUT_INTEGRATION_SECRET|OPENROUTER_API_KEY|Authorization\s*:/)
@@ -220,6 +255,23 @@ test('invalid and script-like backend answers fail safely as plain text content'
     answer: hostileText,
     poweredBy: 'Orbio',
   }).answer, hostileText)
+})
+
+test('document.createElement plus appendChild constructs a complete widget without host mutations in constructor', () => {
+  const element = fakeDocument.createElement('leakscout-assistant') as FakeElement & Record<string, any>
+  assert.ok(element.shadowRoot)
+  assert.ok(element.shadowRoot?.querySelector('.launcher'))
+  assert.equal(element.attributes.size, 0)
+
+  element.setAttribute('mode', 'merchant')
+  element.setAttribute('chat-endpoint', '/backend/chat')
+  fakeDocument.body.appendChild(element)
+  assert.equal(element.isConnected, true)
+  assert.equal(element.shadowRoot?.querySelector('.launcher') !== null, true)
+  assert.equal(element._config.mode, 'merchant')
+
+  element.setAttribute('title', 'Store assistant')
+  assert.equal(element._title.textContent, 'Store assistant')
 })
 
 test('opening and choosing suggestions perform no inference; submitting performs exactly one request', async () => {

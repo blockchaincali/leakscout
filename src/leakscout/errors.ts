@@ -1,3 +1,5 @@
+import type { ProviderDiagnostic } from '../lib/providerErrors.js'
+
 export class InputError extends Error {
   readonly statusCode = 400
 
@@ -9,9 +11,14 @@ export class InputError extends Error {
 
 export class AssistantInferenceError extends Error {
   readonly statusCode = 502
+  readonly diagnostic?: ProviderDiagnostic
 
-  constructor(message = 'The LeakScout assistant is temporarily unavailable.') {
+  constructor(
+    message = 'The LeakScout assistant is temporarily unavailable.',
+    diagnostic?: ProviderDiagnostic,
+  ) {
     super(message)
     this.name = 'AssistantInferenceError'
+    this.diagnostic = diagnostic
   }
 }

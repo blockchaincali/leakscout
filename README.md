@@ -191,6 +191,7 @@ Open http://localhost:3000. `pnpm start` runs the same LeakScout web server and 
 ```dotenv
 # Required for full audits that qualify for Orbio investigation.
 OPENROUTER_API_KEY=your_orbio_issued_openrouter_key
+OPENROUTER_BASE_URL=https://api.orbio.so/api/v1
 
 # Legacy default for starter examples outside the LeakScout role router.
 OPENROUTER_MODEL=google/gemini-2.5-flash-lite
@@ -212,6 +213,7 @@ LEAKSCOUT_INTEGRATION_SECRET=replace-with-a-long-random-secret
 ```
 
 - `OPENROUTER_API_KEY`: the Orbio-issued inference key used through OpenRouter. Never commit a real key.
+- `OPENROUTER_BASE_URL`: optional OpenAI-compatible Orbio API base; defaults to `https://api.orbio.so/api/v1`.
 - `OPENROUTER_MODEL`: backwards-compatible model for starter examples outside LeakScout. LeakScout uses its role models below and cannot be collapsed to one model by this legacy setting.
 - `LEAKSCOUT_SCOUT_MODEL`: fast model for verified-signal routing; defaults to `google/gemini-3.8-flash`.
 - `LEAKSCOUT_INVESTIGATOR_MODEL`: deep merchant investigation; defaults to `anthropic/claude-sonnet-5`.
@@ -234,6 +236,16 @@ node --check public/app.js
 
 The suite covers deterministic analytics, CSV and integration-JSON validation safeguards, authentication, three-stage model routing and grounding, assistant model routing and bounds, partial-data behavior, stage failures and fallback traces, and API behavior. Every model boundary is mocked in tests, so the automated suite does not make Orbio calls or spend credits.
 
+### Provider operations diagnostic
+
+After deployment, an operator can run exactly one minimal provider request from the Railway service environment to inspect a configured model role:
+
+```bash
+pnpm leakscout:provider-check -- --role publicAssistant
+```
+
+Valid roles are `scout`, `investigator`, `critic`, `brief`, `chat`, and `publicAssistant`. The command reports the selected model, whether the endpoint was reached, whether authentication appears accepted, and a safe classification/status. It never prints the key or provider response text. This is an explicit live diagnostic (one minimal inference request); do not run it in automated tests. The server logs use the same redacted classifications for production failures, including stage and completed investigation roles.
+
 ## Deployment
 
 LeakScout is a stateless Node.js service. Deploy the repository with:
@@ -247,7 +259,7 @@ The server reads the platform-provided `PORT` environment variable and serves bo
 
 ## Embedding Ask LeakScout
 
-The reusable assistant is a framework-agnostic Web Component with Shadow DOM, distributed as `/embed/leakscout-assistant.js` and `/embed/leakscout-assistant.css`. It can run directly from LeakScout or be vendored with both assets and the existing `/assets/leakscout-favicon.png` monogram.
+The reusable assistant is the framework-agnostic Web Component `LEAKSCOUT_ASSISTANT_VERSION` **1.0.1**, with Shadow DOM, distributed as `/embed/leakscout-assistant.js` and `/embed/leakscout-assistant.css`. It can run directly from LeakScout or be vendored with both assets and the existing `/assets/leakscout-favicon.png` monogram.
 
 Public product assistant:
 
