@@ -245,6 +245,35 @@ pnpm start
 
 The server reads the platform-provided `PORT` environment variable and serves both the UI and API. Configure `OPENROUTER_API_KEY` and `LEAKSCOUT_INTEGRATION_SECRET` as secrets in Railway. The six `LEAKSCOUT_*_MODEL` variables are optional because role defaults are built in; set them in Railway to pin or change a role's model. `OPENROUTER_MODEL` does not override LeakScout's model roles. The production deployment currently runs on Railway at https://leakscout-production-deaf.up.railway.app.
 
+## Embedding Ask LeakScout
+
+The reusable assistant is a framework-agnostic Web Component with Shadow DOM, distributed as `/embed/leakscout-assistant.js` and `/embed/leakscout-assistant.css`. It can run directly from LeakScout or be vendored with both assets and the existing `/assets/leakscout-favicon.png` monogram.
+
+Public product assistant:
+
+```html
+<script type="module" src="/embed/leakscout-assistant.js"></script>
+<leakscout-assistant mode="public"></leakscout-assistant>
+```
+
+Public mode posts only `{ "question": "..." }` to `/api/public/assistant` by default. LeakScout's own landing page uses this same component and handles its `leakscout:demo` and `leakscout:audit` events to start the demo or scroll to the audit form.
+
+Merchant assistant:
+
+```html
+<script type="module" src="https://<LeakScout-domain>/embed/leakscout-assistant.js"></script>
+<leakscout-assistant
+  mode="merchant"
+  chat-endpoint="/your/backend/leakscout/chat"
+></leakscout-assistant>
+```
+
+Merchant mode posts only a bounded `{ question, history }` payload and defaults to `credentials: "include"` for same-origin authenticated integrations. The browser widget calls the embedding platform's backend; that backend owns authentication, tenant/store scoping, verified context, freshness, rate limits, PII filtering and any LeakScout server-to-server call. The integration path planned for ShopSwift is `mode="merchant"` with `chat-endpoint="/api/dashboard/analytics/leakscout/chat"`; ShopSwift itself is not modified by this widget release.
+
+For merchant use, the trust boundary is **browser widget → partner authenticated backend → LeakScout API → Orbio**. For public product questions, the widget talks directly to LeakScout's rate-limited public assistant endpoint.
+
+Never put `LEAKSCOUT_INTEGRATION_SECRET`, `OPENROUTER_API_KEY`, bearer tokens, merchant context, or customer/payment data in browser code, widget attributes, endpoint query strings, or events. The widget has no bearer-secret option. It renders all messages as text and exposes safe metadata only. Customize limited appearance with `--leakscout-accent`, `--leakscout-ink`, `--leakscout-surface`, `--leakscout-border`, `--leakscout-launcher-size`, `--leakscout-right`, `--leakscout-bottom`, and `--leakscout-z-index`. Other small options include `title`, `subtitle`, `kicker`, `launcher-label`, `position`, `theme`, `max-history`, `suggestions` (JSON), `credentials`, and `accent`. `LEAKSCOUT_ASSISTANT_VERSION` identifies the widget release.
+
 ## Attribution
 
 LeakScout was built for **Orbio Build Week** and uses an **Orbio-issued inference key** for conditional investigation through OpenRouter.
