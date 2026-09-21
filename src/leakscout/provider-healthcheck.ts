@@ -3,6 +3,7 @@ import {
   type ProviderFailureClassification,
 } from '../lib/providerErrors.js'
 import { LEAKSCOUT_MODELS } from '../lib/modelConfig.js'
+import { runProviderHealthCheck } from './providerHealth.js'
 
 const roles = {
   scout: LEAKSCOUT_MODELS.scout,
@@ -44,11 +45,13 @@ async function main(): Promise<void> {
     console.log(JSON.stringify({
       feature: role,
       model,
+      requestedModel: model,
       baseUrlOrigin,
       classification: classificationForMissingKey(),
       keyAccepted: false,
       baseUrlReachable: null,
       modelAnswered: false,
+      hasVisibleContent: false,
       upstreamStatus: null,
       note: 'OPENROUTER_API_KEY is not configured; the key value was not read into output.',
     }, null, 2))
@@ -58,25 +61,16 @@ async function main(): Promise<void> {
 
   try {
     const { openrouter } = await import('../lib/openrouter.js')
-    const response = await openrouter.chat.completions.create({
-      model,
-      messages: [{ role: 'user', content: 'Reply with the single word: ready' }],
-      max_tokens: 8,
-    }, { signal: AbortSignal.timeout(25_000) })
-    const answer = response.choices[0]?.message?.content
-    console.log(JSON.stringify({
+    const result = await runProviderHealthCheck({
       feature: role,
-      model,
+      requestedModel: model,
+      complete: (request, options) => openrouter.chat.completions.create(request, options),
+    })
+    console.log(JSON.stringify({
       baseUrlOrigin,
-      classification: typeof answer === 'string' && answer.trim()
-        ? 'success'
-        : 'structured_output_failure',
-      keyAccepted: true,
-      baseUrlReachable: true,
-      modelAnswered: Boolean(typeof answer === 'string' && answer.trim()),
-      upstreamStatus: 200,
+      ...result,
     }, null, 2))
-    if (typeof answer !== 'string' || !answer.trim()) process.exitCode = 1
+    if (!result.hasVisibleContent) process.exitCode = 1
   } catch (error) {
     const diagnostic = classifyProviderError(error, { feature: role, model })
     const authFailed = diagnostic.classification === 'provider_authentication_failure'
@@ -92,10 +86,12 @@ async function main(): Promise<void> {
         : null
     console.log(JSON.stringify({
       ...diagnostic,
+      requestedModel: model,
       baseUrlOrigin,
       keyAccepted,
       baseUrlReachable: reachable,
       modelAnswered: false,
+      hasVisibleContent: false,
     }, null, 2))
     process.exitCode = 1
   }
@@ -108,6 +104,7 @@ void main().catch(() => {
     keyAccepted: null,
     baseUrlReachable: null,
     modelAnswered: false,
+    hasVisibleContent: false,
   }, null, 2))
   process.exitCode = 1
 })

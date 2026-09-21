@@ -5,6 +5,7 @@ export type ProviderFailureClassification =
   | 'provider_invalid_request'
   | 'provider_gateway_failure'
   | 'provider_timeout'
+  | 'empty_model_response'
   | 'structured_output_failure'
   | 'grounding_failure'
   | 'unknown_provider_failure'
@@ -137,6 +138,7 @@ export function logProviderDiagnostic(diagnostic: ProviderDiagnostic): void {
     'provider_invalid_request',
     'provider_gateway_failure',
     'provider_timeout',
+    'empty_model_response',
     'structured_output_failure',
     'grounding_failure',
     'unknown_provider_failure',

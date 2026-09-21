@@ -18,7 +18,7 @@
     "pdf": "tsx src/examples/06-pdf.ts",
     "agent": "tsx src/examples/07-agent.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test src/leakscout/tests/leakscout.test.ts src/leakscout/tests/assistant.test.ts src/leakscout/tests/agent.test.ts src/leakscout/tests/embed.test.ts src/leakscout/tests/providerErrors.test.ts",
+    "test": "node --import tsx --test src/leakscout/tests/leakscout.test.ts src/leakscout/tests/assistant.test.ts src/leakscout/tests/agent.test.ts src/leakscout/tests/embed.test.ts src/leakscout/tests/providerErrors.test.ts src/leakscout/tests/providerHealth.test.ts",
     "lint": "eslint .",
     "leakscout:web": "tsx src/leakscout/web/server.ts",
     "leakscout:audit": "tsx src/leakscout/test-audit.ts",
