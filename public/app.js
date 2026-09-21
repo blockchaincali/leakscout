@@ -718,7 +718,7 @@ function renderPriorities(payload) {
         'evidence'
 
       evidence.textContent =
-        priority.reasoning
+        priority.candidate.evidence.join(' · ')
 
       const recommendation =
         document.createElement(
@@ -749,10 +749,49 @@ function renderPriorities(payload) {
         action,
       )
 
+      const detailGroups = [
+        {
+          label: 'Why this matters',
+          items: [priority.whyItMatters, priority.reasoning].filter(Boolean),
+        },
+        {
+          label: 'What to check',
+          items: priority.checksToPerform ?? [],
+        },
+        {
+          label: 'Unknowns / limitations',
+          items: priority.assumptionsOrUnknowns ?? [],
+        },
+      ]
+      const detailsContainer = document.createElement('div')
+      detailsContainer.className = 'priority-details-list'
+
+      for (const group of detailGroups) {
+        if (!group.items.length) continue
+
+        const details = document.createElement('details')
+        details.className = 'priority-details'
+
+        const summary = document.createElement('summary')
+        summary.textContent = group.label
+        details.append(summary)
+
+        const content = document.createElement('div')
+        content.className = 'priority-details-content'
+        for (const item of group.items) {
+          const line = document.createElement('p')
+          line.textContent = item
+          content.append(line)
+        }
+        details.append(content)
+        detailsContainer.append(details)
+      }
+
       card.append(
         top,
         evidence,
         recommendation,
+        detailsContainer,
       )
 
       list.append(card)
@@ -1268,10 +1307,37 @@ function renderResult(payload) {
     )
   }
 
-  document.querySelector(
-    '#trace-model',
-  ).textContent =
-    `Model: ${payload.report.model}`
+  const traceList = document.querySelector('#trace-model')
+  clearChildren(traceList)
+  const stageLabels = {
+    scout: 'Scout',
+    investigator: 'Deep investigation',
+    critic: 'Verification',
+  }
+  const modelNames = {
+    'google/gemini-3.8-flash': 'Gemini 3.8 Flash',
+    'anthropic/claude-sonnet-5': 'Claude Sonnet 5',
+    'openai/gpt-6-astra': 'GPT-6 Astra',
+  }
+  const trace = payload.report.modelTrace ?? []
+
+  if (trace.length) {
+    for (const stage of trace) {
+      const item = document.createElement('div')
+      item.className = 'trace-stage'
+
+      const role = document.createElement('span')
+      role.textContent = stageLabels[stage.role] ?? stage.role
+
+      const model = document.createElement('strong')
+      model.textContent = modelNames[stage.model] ?? stage.model
+
+      item.append(role, model)
+      traceList.append(item)
+    }
+  } else {
+    traceList.textContent = 'Deterministic result · no inference stages completed'
+  }
 
   document.querySelector(
     '#trace-tools',

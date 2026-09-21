@@ -543,6 +543,34 @@ summary:focus-visible {
   margin-bottom: 5px;
 }
 
+.priority-details-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.priority-details {
+  border-top: 1px solid var(--line);
+  padding-top: 11px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.priority-details summary {
+  color: var(--ink);
+  cursor: pointer;
+  font-weight: 750;
+}
+
+.priority-details-content {
+  padding: 6px 0 0 2px;
+  line-height: 1.55;
+}
+
+.priority-details-content p {
+  margin: 7px 0;
+}
+
 .action-panel {
   align-self: start;
   position: sticky;
@@ -630,6 +658,35 @@ summary:focus-visible {
 .agent-trace strong {
   display: block;
   margin-top: 4px;
+}
+
+.trace-model-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.trace-stage {
+  min-width: 145px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface);
+}
+
+.trace-stage span {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.trace-stage strong {
+  overflow-wrap: anywhere;
+  font-size: 12px;
 }
 
 .investigation-decision {

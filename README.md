@@ -12,18 +12,23 @@ LeakScout is an autonomous business investigation agent that identifies verified
 Business data
     -> deterministic analytics
     -> verified candidate signals
-    -> decision whether inference is worthwhile
-    -> Orbio investigation
+    -> Scout selects signals with inspect_verified_leaks
+    -> deep investigator builds a grounded business diagnosis
+    -> independent critic checks and corrects the draft
     -> prioritized actions
     -> Orbio assistant brief and grounded merchant Q&A
 ```
 
 - **LeakScout** is the standalone intelligence engine and API.
 - **ShopSwift** is LeakScout's first live integration.
-- **Orbio investigator** prioritizes verified findings when enough context exists.
+- **Scout** uses a fast model to route attention across verified candidates and invokes the `inspect_verified_leaks` tool.
+- **Deep investigator** uses a strong reasoning model to explain business significance, urgency, checks and watch items from selected evidence.
+- **Critic** independently challenges the draft, verifies claims, checks unknowns and may reorder or replace priorities only with verified candidates.
 - **Orbio assistant** translates the latest verified report into plain business language and answers merchant questions grounded in that report.
 
-The core engineering principle is simple: **the deterministic engine calculates verified truth.** LeakScout's Orbio layers may prioritize, explain, and summarize that truth, but they cannot create a candidate, invent a financial figure or cause, or modify a value calculated by the analytics engine. If inference is unnecessary, lacks sufficient context, or fails, LeakScout's audit still returns an appropriate deterministic result.
+The core engineering principle is simple: **financial truth remains deterministic.** The models investigate and reason over verified facts; they cannot create a candidate, invent a financial figure or cause, or modify a value calculated by the analytics engine. Separate models serve separate purposes: a fast model routes broad investigation, a strong reasoning model develops a merchant diagnosis, and an independent strong model challenges it. If inference is unnecessary, lacks sufficient context, or fails validation, LeakScout returns an appropriate deterministic result.
+
+A successful full audit with at least three verified signals uses one Scout call, one deep-investigator call and one critic call. Scout must call `inspect_verified_leaks`; the investigator receives only the deterministic summary, selected verified candidates and data-quality limits; the critic receives the complete deterministic candidate set and the investigator draft. No hidden repeated loops run.
 
 ## Audit modes
 
@@ -48,7 +53,7 @@ Unknown data remains unknown. For example, missing costs do not become selling p
 
 ### Source-currency semantics
 
-`sourceCurrency` declares the accounting currency already present in the uploaded files. LeakScout does not perform foreign-exchange conversion and does not relabel financial values. The bundled demo data is denominated in NGN.
+`sourceCurrency` declares the accounting currency already present in uploaded merchant files. Upload and ShopSwift audits do not perform foreign-exchange conversion or relabel financial values. The synthetic demo fixtures use canonical NGN values and convert demo monetary fields with fixed illustrative rates before deterministic analysis.
 
 ## API
 
@@ -109,7 +114,7 @@ Example request:
 
 At least one non-empty dataset is required. Sales are limited to 10,000 rows, inventory to 5,000 rows, and the JSON body to 1 MB. Missing optional financial or stock values remain unknown. `currentStock: -1` means untracked stock; other negative stock values are rejected. Successful responses use the standard LeakScout execution shape: `dataMode`, `agentUsed`, `agentStatus`, `poweredBy`, `coverage`, `audit`, `report`, and `currencySemantics`.
 
-Audit execution metadata remains explicit: `agentUsed` and `agentStatus` describe whether the investigation ran, while `report.model` and `report.toolCalls` describe the report path used.
+Audit execution metadata remains explicit: `agentUsed` and `agentStatus` describe whether the investigation ran, `report.modelTrace` lists only completed inference stages with their actual returned model IDs, and `report.toolCalls` lists tools invoked. `report.model` remains for older clients. A successful report includes richer per-priority rationale, concrete checks, watch items and unknowns; deterministic fallback actions remain available if inference fails validation.
 
 ### `POST /api/integrations/shopswift/brief`
 
@@ -142,7 +147,7 @@ Creates one short merchant-facing AI Brief from sanitized, verified LeakScout co
 }
 ```
 
-The response contains `summary`, up to three `actions`, optional `watchFor`, `referencedCandidateIds`, and explicit execution metadata: `poweredBy: "Orbio"`, `model`, and `inferenceUsed: true`.
+The response contains `summary`, up to three `actions`, optional `watchFor`, `referencedCandidateIds`, and explicit execution metadata: `poweredBy: "Orbio"`, the configured brief `model`, and `inferenceUsed: true`. When provided in the verified context, the final investigated priorities and action plan are available to the brief model.
 
 ### `POST /api/integrations/shopswift/chat`
 
@@ -187,8 +192,16 @@ Open http://localhost:3000. `pnpm start` runs the same LeakScout web server and 
 # Required for full audits that qualify for Orbio investigation.
 OPENROUTER_API_KEY=your_orbio_issued_openrouter_key
 
-# Optional model override.
+# Legacy default for starter examples outside the LeakScout role router.
 OPENROUTER_MODEL=google/gemini-2.5-flash-lite
+
+# Optional LeakScout role overrides; the defaults below are active when unset.
+LEAKSCOUT_SCOUT_MODEL=google/gemini-3.8-flash
+LEAKSCOUT_INVESTIGATOR_MODEL=anthropic/claude-sonnet-5
+LEAKSCOUT_CRITIC_MODEL=openai/gpt-6-astra
+LEAKSCOUT_BRIEF_MODEL=openai/gpt-6-astra
+LEAKSCOUT_CHAT_MODEL=anthropic/claude-sonnet-5
+LEAKSCOUT_PUBLIC_ASSISTANT_MODEL=google/gemini-3.8-flash
 
 # Optional OpenRouter application attribution.
 APP_NAME=LeakScout
@@ -199,7 +212,13 @@ LEAKSCOUT_INTEGRATION_SECRET=replace-with-a-long-random-secret
 ```
 
 - `OPENROUTER_API_KEY`: the Orbio-issued inference key used through OpenRouter. Never commit a real key.
-- `OPENROUTER_MODEL`: model used by the investigation layer. If omitted, the code's configured default is used.
+- `OPENROUTER_MODEL`: backwards-compatible model for starter examples outside LeakScout. LeakScout uses its role models below and cannot be collapsed to one model by this legacy setting.
+- `LEAKSCOUT_SCOUT_MODEL`: fast model for verified-signal routing; defaults to `google/gemini-3.8-flash`.
+- `LEAKSCOUT_INVESTIGATOR_MODEL`: deep merchant investigation; defaults to `anthropic/claude-sonnet-5`.
+- `LEAKSCOUT_CRITIC_MODEL`: independent report verification; defaults to `openai/gpt-6-astra`.
+- `LEAKSCOUT_BRIEF_MODEL`: authenticated merchant brief; defaults to `openai/gpt-6-astra`.
+- `LEAKSCOUT_CHAT_MODEL`: authenticated merchant Q&A; defaults to `anthropic/claude-sonnet-5`.
+- `LEAKSCOUT_PUBLIC_ASSISTANT_MODEL`: public product assistant; defaults to `google/gemini-3.8-flash`.
 - `APP_NAME`: application name sent for OpenRouter attribution.
 - `APP_URL`: application URL sent for OpenRouter attribution.
 - `LEAKSCOUT_INTEGRATION_SECRET`: shared secret required by integration routes. Keep it server-side and send it only in the `Authorization` bearer header.
@@ -213,7 +232,7 @@ pnpm lint
 node --check public/app.js
 ```
 
-The suite covers deterministic analytics, CSV and integration-JSON validation safeguards, authentication, agent-output validation, assistant grounding and bounds, partial-data behavior, provider fallback, and API behavior. Provider calls are mocked in assistant and HTTP tests, so the automated suite does not spend Orbio credits.
+The suite covers deterministic analytics, CSV and integration-JSON validation safeguards, authentication, three-stage model routing and grounding, assistant model routing and bounds, partial-data behavior, stage failures and fallback traces, and API behavior. Every model boundary is mocked in tests, so the automated suite does not make Orbio calls or spend credits.
 
 ## Deployment
 
@@ -224,7 +243,7 @@ pnpm install --frozen-lockfile
 pnpm start
 ```
 
-The server reads the platform-provided `PORT` environment variable and serves both the UI and API. Configure the environment variables above in the deployment platform; keep `OPENROUTER_API_KEY` and `LEAKSCOUT_INTEGRATION_SECRET` secret. The production deployment currently runs on Railway at https://leakscout-production-deaf.up.railway.app.
+The server reads the platform-provided `PORT` environment variable and serves both the UI and API. Configure `OPENROUTER_API_KEY` and `LEAKSCOUT_INTEGRATION_SECRET` as secrets in Railway. The six `LEAKSCOUT_*_MODEL` variables are optional because role defaults are built in; set them in Railway to pin or change a role's model. `OPENROUTER_MODEL` does not override LeakScout's model roles. The production deployment currently runs on Railway at https://leakscout-production-deaf.up.railway.app.
 
 ## Attribution
 

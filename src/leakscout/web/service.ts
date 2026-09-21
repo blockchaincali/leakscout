@@ -9,7 +9,11 @@ import {
   runInventoryOnlyAudit,
   runSalesOnlyAudit,
 } from '../analytics/partialAudit.js'
-import type { LeakScoutReport } from '../agent/leakScout.js'
+import {
+  LeakScoutPipelineError,
+  type LeakScoutReport,
+  type ModelTraceEntry,
+} from '../agent/leakScout.js'
 import { InputError } from '../errors.js'
 
 export type DataMode =
@@ -110,6 +114,8 @@ function urgencyFor(
 function buildFallbackReport(
   audit: AuditResult,
   mode: DataMode,
+  modelTrace: ModelTraceEntry[] = [],
+  toolCalls: string[] = [],
 ): LeakScoutReport {
   const selected =
     audit.candidates.slice(0, 3)
@@ -200,9 +206,19 @@ function buildFallbackReport(
         },
         reasoning:
           candidate.evidence.join('; '),
+        whyItMatters:
+          candidate.evidence.join('; '),
         recommendedAction:
           actionFor(candidate),
         urgency: urgencyFor(candidate),
+        checksToPerform: [
+          'Confirm the relevant source records and current operating conditions.',
+          'Compare the signal with the matching recent business records before changing policy.',
+        ],
+        watchFor: [monitorFor(candidate)],
+        assumptionsOrUnknowns: [
+          'The supplied data does not establish the underlying cause.',
+        ],
       }),
     ),
     actionPlan: {
@@ -241,7 +257,9 @@ function buildFallbackReport(
       mode === 'full'
         ? 'deterministic-fallback'
         : 'deterministic-partial',
-    toolCalls: [],
+    modelTrace,
+    provider: 'Orbio',
+    toolCalls,
   }
 }
 
@@ -471,7 +489,7 @@ export async function executeLeakScout(
       (await import('../agent/leakScout.js')).runLeakScoutAgent
     const report = await withTimeout(
       (signal) => runAgent(audit, signal),
-      25_000,
+      160_000,
     )
 
     return {
@@ -485,7 +503,12 @@ export async function executeLeakScout(
       coverage,
     }
   } catch (error) {
-    void error
+    const modelTrace = error instanceof LeakScoutPipelineError
+      ? error.modelTrace
+      : []
+    const toolCalls = error instanceof LeakScoutPipelineError
+      ? error.toolCalls
+      : []
     console.error('Orbio investigation failed; deterministic fallback activated.')
 
     return {
@@ -493,9 +516,11 @@ export async function executeLeakScout(
       report: buildFallbackReport(
         audit,
         mode,
+        modelTrace,
+        toolCalls,
       ),
       dataMode: mode,
-      agentUsed: false,
+      agentUsed: modelTrace.length > 0,
       agentStatus: 'fallback',
       poweredBy: 'Orbio',
       currencySemantics: 'source_accounting_currency',

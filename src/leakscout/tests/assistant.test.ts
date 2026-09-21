@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import {
   answerPublicLeakScoutQuestion,
   answerLeakScoutQuestion,
+  completeAssistantWithClient,
   generateAiBrief,
   parseChatRequest,
   parsePublicAssistantRequest,
@@ -11,7 +12,9 @@ import {
   type ChatRequest,
   type VerifiedLeakScoutContext,
 } from '../agent/assistant.js'
+import type OpenAI from 'openai'
 import { AssistantInferenceError, InputError } from '../errors.js'
+import { LEAKSCOUT_MODELS } from '../../lib/modelConfig.js'
 
 const context: VerifiedLeakScoutContext = {
   currency: 'NGN',
@@ -56,7 +59,7 @@ test('AI Brief returns a structured grounded response and execution metadata', a
     complete: async (request) => {
       calls += 1
       assert.equal(request.maxTokens, 650)
-      assert.equal(request.model.length > 0, true)
+      assert.equal(request.model, LEAKSCOUT_MODELS.brief)
       return {
         content: JSON.stringify({
           summary:
@@ -135,8 +138,9 @@ test('AI Brief handles provider errors without fabricating a response', async ()
 test('Ask LeakScout answers a grounded question in one provider call', async () => {
   let calls = 0
   const result = await answerLeakScoutQuestion(chatRequest, {
-    complete: async () => {
+    complete: async (request) => {
       calls += 1
+      assert.equal(request.model, LEAKSCOUT_MODELS.chat)
       return {
         content: JSON.stringify({
           answer:
@@ -153,6 +157,50 @@ test('Ask LeakScout answers a grounded question in one provider call', async () 
   assert.match(result.answer, /does not establish why/i)
   assert.deepEqual(result.referencedCandidateIds, ['C1'])
   assert.ok(result.suggestedQuestions.length <= 3)
+})
+
+test('merchant chat routes to the configured chat model', async () => {
+  await answerLeakScoutQuestion(chatRequest, {
+    complete: async (request) => {
+      assert.equal(request.model, LEAKSCOUT_MODELS.chat)
+      return {
+        content: JSON.stringify({
+          answer: 'Check the verified evidence and operating records.',
+          referencedCandidateIds: ['C1'],
+          suggestedQuestions: [],
+        }),
+      }
+    },
+  })
+})
+
+test('assistant OpenRouter adapter honors the model supplied by its caller', async () => {
+  let sentModel = ''
+  const client = {
+    chat: {
+      completions: {
+        create: async (request: { model: string }) => {
+          sentModel = request.model
+          return {
+            choices: [{ message: { content: JSON.stringify({ answer: 'ok' }) } }],
+            model: 'actual/requested-model',
+          }
+        },
+      },
+    },
+  } as unknown as OpenAI
+  const result = await completeAssistantWithClient(client, {
+    model: 'role/specific-model',
+    system: 'system',
+    user: 'user',
+    schemaName: 'test_schema',
+    schema: { type: 'object' },
+    maxTokens: 10,
+    signal: new AbortController().signal,
+  })
+
+  assert.equal(sentModel, 'role/specific-model')
+  assert.equal(result.model, 'actual/requested-model')
 })
 
 test('Ask LeakScout validates bounded question and conversation history', () => {
@@ -261,7 +309,8 @@ test('public assistant uses one bounded product-grounded completion', async () =
     {
       complete: async (request) => {
         calls += 1
-        assert.equal(request.maxTokens, 350)
+      assert.equal(request.maxTokens, 350)
+      assert.equal(request.model, LEAKSCOUT_MODELS.publicAssistant)
         assert.match(request.system, /deterministic code/i)
         assert.match(request.system, /synthetic data/i)
         assert.match(request.system, /USD is the default demo currency/i)

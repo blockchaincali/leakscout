@@ -3,30 +3,39 @@ import type {
   ChatCompletionMessageParam,
   ChatCompletionTool,
 } from 'openai/resources/chat/completions'
-import { DEFAULT_MODEL, openrouter } from '../../lib/openrouter.js'
+import { LEAKSCOUT_MODELS, LEAKSCOUT_TIMEOUTS_MS } from '../../lib/modelConfig.js'
 import type {
   AuditResult,
   LeakCandidate,
-  LeakCategory,
 } from '../types.js'
-import { AgentDecisionSchema } from './schemas.js'
+import {
+  InvestigationReportSchema,
+  ScoutToolArgsSchema,
+} from './schemas.js'
 import {
   ALL_LEAK_CATEGORIES,
-  parseInvestigationCategories,
-  validatePrioritySelections,
+  parseScoutToolArgs,
+  validateCandidateIds,
 } from './validation.js'
 
-export type CandidateWithId = LeakCandidate & {
-  id: string
-}
+export type CandidateWithId = LeakCandidate & { id: string }
+export type Urgency = 'today' | 'this_week' | 'monitor'
+export type ModelRole = 'scout' | 'investigator' | 'critic'
 
-type Urgency = 'today' | 'this_week' | 'monitor'
+export type ModelTraceEntry = {
+  role: ModelRole
+  model: string
+}
 
 export type VerifiedPriority = {
   candidate: CandidateWithId
+  urgency: Urgency
+  whyItMatters: string
   reasoning: string
   recommendedAction: string
-  urgency: Urgency
+  checksToPerform: string[]
+  watchFor: string[]
+  assumptionsOrUnknowns: string[]
 }
 
 export type LeakScoutReport = {
@@ -38,11 +47,103 @@ export type LeakScoutReport = {
     thisWeek: string[]
     monitor: string[]
   }
+  /** Kept for existing clients; identifies the last successful inference stage. */
   model: string
+  modelTrace: ModelTraceEntry[]
+  provider: 'Orbio'
   toolCalls: string[]
 }
 
-const ALL_CATEGORIES: LeakCategory[] = ALL_LEAK_CATEGORIES
+export type AgentCompletionRequest = {
+  role: ModelRole
+  model: string
+  messages: ChatCompletionMessageParam[]
+  tools?: ChatCompletionTool[]
+  schema?: z.ZodType
+  maxTokens: number
+  signal: AbortSignal
+}
+
+export type AgentCompletionResult = {
+  content: string | null
+  toolCalls?: Array<{ id: string; name: string; arguments: string }>
+  model?: string
+}
+
+export type AgentCompletion = (
+  request: AgentCompletionRequest,
+) => Promise<AgentCompletionResult>
+
+export type LeakScoutAgentOptions = {
+  complete?: AgentCompletion
+}
+
+export class LeakScoutPipelineError extends Error {
+  constructor(
+    message: string,
+    readonly modelTrace: ModelTraceEntry[],
+    readonly toolCalls: string[],
+  ) {
+    super(message)
+    this.name = 'LeakScoutPipelineError'
+  }
+}
+
+const scoutTool: ChatCompletionTool = {
+  type: 'function',
+  function: {
+    name: 'inspect_verified_leaks',
+    description:
+      'Select verified candidate IDs for deeper investigation and specify evidence areas. The tool returns only deterministic candidates and their verified evidence.',
+    parameters: z.toJSONSchema(ScoutToolArgsSchema),
+  },
+}
+
+const SCOUT_SYSTEM_PROMPT = `
+You are LeakScout Scout, the first stage of a business investigation.
+
+Use inspect_verified_leaks exactly once to choose at least three and at most
+fifteen verified candidate IDs for deeper investigation. Select candidates
+across relevant categories and name evidence areas that the investigator
+should examine. Only select IDs present in the supplied index.
+
+You route investigation; you do not calculate, estimate, compare, or restate
+money. Do not infer causes or merchant behavior. Return no narrative outside
+the required tool call.
+`.trim()
+
+const INVESTIGATOR_SYSTEM_PROMPT = `
+You are LeakScout's deep business investigator. The supplied summary,
+limitations and selected candidates are the complete evidence available to you.
+
+Return exactly three distinct priorities from the supplied candidate IDs.
+Explain business significance and relative priority using verified facts.
+Give a concrete first action, 2-4 operational checks, 1-3 watch items, and
+explicit unknowns for each priority. Do not treat different impact types as
+directly comparable. Keep reasoning concise; it is a business rationale, not
+hidden chain of thought.
+
+Never invent a cause, financial figure, transaction, customer or supplier
+behavior, demand explanation, stock value, or other fact. If a cause is not
+established, say that it cannot be confirmed from the supplied data. Do not
+repeat calculations or add numeric claims beyond supplied evidence.
+`.trim()
+
+const CRITIC_SYSTEM_PROMPT = `
+You are LeakScout's independent report critic. Challenge the investigator
+draft against the complete deterministic context and return a corrected report
+with exactly three distinct priorities.
+
+Verify candidate IDs and evidence, reject invented causes or numbers, check
+that urgency is defensible, actions fit the evidence, stronger verified
+signals are not ignored, and unknowns are explicit. Do not compare unlike
+financial impact types as if directly equivalent. You may reorder or replace
+priorities using only verified candidate IDs and may revise all prose.
+
+The supplied deterministic context is authoritative. Do not create or alter
+impact values, evidence, financial facts or candidate IDs. Do not include
+hidden chain of thought; return concise business rationale only.
+`.trim()
 
 function withIds(candidates: LeakCandidate[]): CandidateWithId[] {
   return candidates.map((candidate, index) => ({
@@ -51,311 +152,358 @@ function withIds(candidates: LeakCandidate[]): CandidateWithId[] {
   }))
 }
 
-function categoryLabel(category: LeakCategory): string {
-  switch (category) {
-    case 'stockout_risk':
-      return 'stockout risk'
-    case 'margin_compression':
-      return 'margin compression'
-    case 'dead_inventory':
-      return 'dead inventory'
-    case 'sales_anomaly':
-      return 'sales decline'
-    case 'inventory_exposure':
-      return 'inventory exposure'
+function modelFor(role: ModelRole): string {
+  return LEAKSCOUT_MODELS[role]
+}
+
+function actualModel(result: AgentCompletionResult, requested: string): string {
+  return result.model?.trim() || requested
+}
+
+async function openRouterCompletion(
+  request: AgentCompletionRequest,
+): Promise<AgentCompletionResult> {
+  const { openrouter } = await import('../../lib/openrouter.js')
+  const response = await openrouter.chat.completions.create(
+    {
+      model: request.model,
+      messages: request.messages,
+      ...(request.tools
+        ? { tools: request.tools, tool_choice: 'required' as const }
+        : {}),
+      ...(request.schema
+        ? {
+            response_format: {
+              type: 'json_schema' as const,
+              json_schema: {
+                name: `leakscout_${request.role}_report`,
+                strict: true,
+                schema: z.toJSONSchema(request.schema),
+              },
+            },
+          }
+        : {}),
+      max_tokens: request.maxTokens,
+    },
+    { signal: request.signal },
+  )
+
+  const message = response.choices[0]?.message
+  return {
+    content: message?.content ?? null,
+    toolCalls: message?.tool_calls?.flatMap((call) =>
+      call.type === 'function'
+        ? [{
+            id: call.id,
+            name: call.function.name,
+            arguments: call.function.arguments,
+          }]
+        : [],
+    ),
+    model: response.model ?? undefined,
   }
 }
 
-function safeReason(candidate: CandidateWithId): string {
-  return candidate.evidence.join('; ')
-}
+async function completeWithTimeout(
+  complete: AgentCompletion,
+  request: Omit<AgentCompletionRequest, 'signal'> & { signal?: AbortSignal },
+  timeoutMs: number,
+): Promise<AgentCompletionResult> {
+  const controller = new AbortController()
+  const abortFromParent = () => controller.abort(request.signal?.reason)
+  request.signal?.addEventListener('abort', abortFromParent, { once: true })
+  if (request.signal?.aborted) abortFromParent()
 
-function safeAction(candidate: CandidateWithId): string {
-  switch (candidate.category) {
-    case 'stockout_risk':
-      return 'Reorder promptly and review the reorder threshold using recent sales velocity and supplier lead time.'
-
-    case 'margin_compression':
-      return 'Review selling price and supplier terms to restore healthy unit economics.'
-
-    case 'dead_inventory':
-      return 'Pause further reordering and consider clearance, bundling or promotion to recover working capital.'
-
-    case 'sales_anomaly':
-      return 'Investigate availability, pricing, promotions and demand changes before changing inventory commitments.'
-
-    case 'inventory_exposure':
-      return 'Review recent movement and demand before increasing this inventory position.'
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      complete({ ...request, signal: controller.signal }),
+      new Promise<AgentCompletionResult>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          controller.abort(new Error(`${request.role} stage timed out`))
+          reject(new Error(`LeakScout ${request.role} stage timed out.`))
+        }, timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+    request.signal?.removeEventListener('abort', abortFromParent)
   }
 }
 
-function monitorAction(candidate: CandidateWithId): string {
-  switch (candidate.category) {
-    case 'stockout_risk':
-      return `Monitor ${candidate.productName ?? candidate.sku ?? 'the product'} inventory cover against supplier lead time.`
+function decodeReport(result: AgentCompletionResult) {
+  if (!result.content) throw new Error('Model returned no structured report.')
+  let decoded: unknown
+  try {
+    decoded = JSON.parse(result.content)
+  } catch {
+    throw new Error('Model returned invalid JSON.')
+  }
+  return InvestigationReportSchema.parse(decoded)
+}
 
-    case 'margin_compression':
-      return `Monitor ${candidate.productName ?? candidate.sku ?? 'the product'} unit margin after pricing or supplier changes.`
+function numericFacts(value: unknown): Set<number> {
+  const matches = JSON.stringify(value).match(/-?\d[\d,]*(?:\.\d+)?/g) ?? []
+  return new Set(matches.flatMap((match) => {
+    const number = Number(match.replaceAll(',', ''))
+    return Number.isFinite(number) ? [number] : []
+  }))
+}
 
-    case 'dead_inventory':
-      return `Monitor whether ${candidate.productName ?? candidate.sku ?? 'the product'} inventory begins moving before any reorder.`
+const unsupportedCausePattern =
+  /\b(?:because|due to|caused by|causing|driven by|resulted from|resulting from|customers? (?:stopped|reduced|abandoned|rejected|preferred|switched)|demand (?:fell|dropped|rose|increased|declined)|supplier (?:delay|failure|shortage|increase|raised|failed))\b/i
 
-    case 'sales_anomaly':
-      return `Monitor ${candidate.productName ?? candidate.sku ?? 'the product'} sales against its previous run rate.`
-
-    case 'inventory_exposure':
-      return `Monitor ${candidate.productName ?? candidate.sku ?? 'the product'} inventory movement before reordering.`
+function assertNumbersGrounded(text: string, facts: unknown): void {
+  const allowedNumbers = numericFacts(facts)
+  const matches = text.match(/-?\d[\d,]*(?:\.\d+)?/g) ?? []
+  for (const match of matches) {
+    const number = Number(match.replaceAll(',', ''))
+    if (!allowedNumbers.has(number)) {
+      throw new Error(`Model introduced unsupported numeric claim: ${number}`)
+    }
   }
 }
 
-function dedupe(values: string[]): string[] {
-  return [...new Set(values)]
+function validateReportGrounding(
+  report: z.infer<typeof InvestigationReportSchema>,
+  verifiedContext: unknown,
+  candidates: CandidateWithId[],
+  allowedCandidateIds: ReadonlySet<string>,
+): CandidateWithId[] {
+  const selected = validateCandidateIds(
+    candidates,
+    report.priorities.map((priority) => priority.candidateId),
+  )
+
+  for (const priority of report.priorities) {
+    if (!allowedCandidateIds.has(priority.candidateId)) {
+      throw new Error(`Model selected uninspected candidate: ${priority.candidateId}`)
+    }
+  }
+
+  const allCandidatesById = new Map(candidates.map((candidate) => [candidate.id, candidate]))
+  assertNumbersGrounded(
+    `${report.headline} ${report.executiveSummary}`,
+    verifiedContext,
+  )
+  for (const priority of report.priorities) {
+    assertNumbersGrounded(
+      [
+        priority.whyItMatters,
+        priority.reasoning,
+        priority.recommendedAction,
+        ...priority.checksToPerform,
+        ...priority.watchFor,
+        ...priority.assumptionsOrUnknowns,
+      ].join(' '),
+      {
+        summary: (verifiedContext as { summary?: unknown }).summary,
+        candidate: allCandidatesById.get(priority.candidateId),
+      },
+    )
+  }
+
+  const verifiedText = JSON.stringify(verifiedContext).toLowerCase()
+  const prose = [
+    report.headline,
+    report.executiveSummary,
+    ...report.priorities.flatMap((priority) => [
+      priority.whyItMatters,
+      priority.reasoning,
+      priority.recommendedAction,
+      ...priority.checksToPerform,
+      ...priority.watchFor,
+      ...priority.assumptionsOrUnknowns,
+    ]),
+  ]
+  for (const text of prose) {
+    const claim = text.match(unsupportedCausePattern)?.[0]
+    if (claim && !verifiedText.includes(claim.toLowerCase())) {
+      throw new Error(`Model introduced unsupported causal claim: ${claim}`)
+    }
+  }
+
+  return selected
+}
+
+function makeReport(
+  source: z.infer<typeof InvestigationReportSchema>,
+  candidates: CandidateWithId[],
+  trace: ModelTraceEntry[],
+  toolCalls: string[],
+): LeakScoutReport {
+  const candidateById = new Map(candidates.map((candidate) => [candidate.id, candidate]))
+  const priorities: VerifiedPriority[] = source.priorities.map((priority) => ({
+    ...priority,
+    candidate: candidateById.get(priority.candidateId)!,
+  }))
+  return {
+    headline: source.headline,
+    executiveSummary: source.executiveSummary,
+    priorities,
+    actionPlan: {
+      today: priorities
+        .filter((priority) => priority.urgency === 'today')
+        .map((priority) => priority.recommendedAction),
+      thisWeek: priorities
+        .filter((priority) => priority.urgency === 'this_week')
+        .map((priority) => priority.recommendedAction),
+      monitor: priorities.flatMap((priority) => priority.watchFor),
+    },
+    model: trace.at(-1)?.model ?? 'deterministic-fallback',
+    modelTrace: [...trace],
+    provider: 'Orbio',
+    toolCalls: [...new Set(toolCalls)],
+  }
 }
 
 export async function runLeakScoutAgent(
   audit: AuditResult,
   signal?: AbortSignal,
+  options: LeakScoutAgentOptions = {},
 ): Promise<LeakScoutReport> {
-  const MAX_PER_CATEGORY = 8
-  const limitedCandidates = ALL_CATEGORIES.flatMap((category) =>
-    audit.candidates
-      .filter((candidate) => candidate.category === category)
-      .slice(0, MAX_PER_CATEGORY),
-  )
-  const included = new Set(limitedCandidates)
-  const candidates = withIds(
-    audit.candidates.filter((candidate) => included.has(candidate)),
-  )
-
-  if (candidates.length < 3) {
-    throw new Error(
-      `LeakScout requires at least 3 verified candidates, found ${candidates.length}.`,
-    )
-  }
-
-  const inspectedCandidateIds = new Set<string>()
+  const trace: ModelTraceEntry[] = []
   const toolCallsUsed: string[] = []
+  const complete = options.complete ?? openRouterCompletion
 
-  const InvestigationArgs = z.object({
-    categories: z
-      .array(
-        z.enum([
-          'stockout_risk',
-          'margin_compression',
-          'dead_inventory',
-          'sales_anomaly',
-          'inventory_exposure',
-        ]),
-      )
-      .min(1)
-      .describe('Leak categories to investigate.'),
-  })
-
-  const investigationTool: ChatCompletionTool = {
-    type: 'function',
-    function: {
-      name: 'inspect_verified_leaks',
-      description:
-        'Inspect deterministic, verified profit-leak candidates. Choose the categories needed to prioritize the business.',
-      parameters: z.toJSONSchema(InvestigationArgs),
-    },
-  }
-
-  const messages: ChatCompletionMessageParam[] = [
-    {
-      role: 'system',
-      content: `
-You are LeakScout, an autonomous profit-leak investigator.
-
-Your task is to determine which THREE verified issues deserve the business
-owner's attention first.
-
-Financial calculations are performed by deterministic code, not by you.
-
-Use the investigation tool before making a decision.
-
-When prioritizing:
-- consider urgency
-- consider recurring financial damage
-- consider working capital exposure
-- consider whether an issue could interrupt future sales
-- do not assume different financial impact types are directly comparable
-- do not invent candidates or financial values
-
-Your final decision will contain candidate IDs and urgency only.
-`.trim(),
-    },
-    {
-      role: 'user',
-      content: JSON.stringify({
-        task: 'Investigate the business and prioritize its three most important verified profit leaks.',
-        businessSummary: audit.summary,
-        candidateCount: candidates.length,
-        availableCategories: ALL_CATEGORIES,
-      }),
-    },
-  ]
-
-  const investigation = await openrouter.chat.completions.create(
-    {
-      model: DEFAULT_MODEL,
-      messages,
-      tools: [investigationTool],
-      tool_choice: 'required',
-      max_tokens: 500,
-    },
-    { signal },
-  )
-
-  const investigationMessage = investigation.choices[0]?.message
-
-  if (!investigationMessage) {
-    throw new Error('LeakScout returned no investigation message.')
-  }
-
-  messages.push(investigationMessage)
-
-  if (!investigationMessage.tool_calls?.length) {
-    throw new Error('LeakScout did not call its investigation tool.')
-  }
-
-  for (const call of investigationMessage.tool_calls) {
-    if (call.type !== 'function') continue
-
-    toolCallsUsed.push('inspect_verified_leaks')
-
-    let categories: LeakCategory[] = ALL_CATEGORIES
-
-    try {
-      categories = parseInvestigationCategories(call.function.arguments)
-    } catch {
-      categories = ALL_CATEGORIES
+  try {
+    const candidates = withIds(audit.candidates)
+    if (candidates.length < 3) {
+      throw new Error(`LeakScout requires at least 3 verified candidates, found ${candidates.length}.`)
     }
 
-    const requested = candidates.filter((candidate) =>
-      categories.includes(candidate.category),
-    )
-    const result = [...requested]
+    const candidateIndex = candidates.map(({ id, category, title, productName }) => ({
+      id,
+      category,
+      title,
+      productName,
+    }))
 
-    // Always return enough verified context for the final selection without
-    // paying for another investigation call.
-    if (result.length < 3) {
-      for (const candidate of candidates) {
-        if (!result.includes(candidate)) result.push(candidate)
-        if (result.length === 3) break
-      }
-    }
-
-    for (const candidate of result) {
-      inspectedCandidateIds.add(candidate.id)
-    }
-
-    messages.push({
-      role: 'tool',
-      tool_call_id: call.id,
-      content: JSON.stringify(
-        result.map((candidate) => ({
-          id: candidate.id,
-          category: candidate.category,
-          productName: candidate.productName,
-          title: candidate.title,
-          evidence: candidate.evidence,
-          impact: candidate.impact,
-          confidence: candidate.confidence,
-          metadata: candidate.metadata,
-        })),
-      ),
-    })
-  }
-
-  if (inspectedCandidateIds.size < 3) {
-    throw new Error('LeakScout did not inspect enough verified candidates.')
-  }
-
-  messages.push({
-    role: 'user',
-    content: `
-Investigation is complete.
-
-Select exactly THREE distinct verified candidate IDs.
-
-Return only:
-- candidateId
-- urgency: today, this_week or monitor
-
-Do not provide financial calculations, recommendations, prose or new facts.
-`.trim(),
-  })
-
-  const final = await openrouter.chat.completions.create(
-    {
-      model: DEFAULT_MODEL,
-      messages,
-      max_tokens: 300,
-      response_format: {
-        type: 'json_schema',
-        json_schema: {
-          name: 'leakscout_priority_decision',
-          strict: true,
-          schema: z.toJSONSchema(AgentDecisionSchema),
+    const scoutModel = modelFor('scout')
+    const scout = await completeWithTimeout(complete, {
+      role: 'scout',
+      model: scoutModel,
+      messages: [
+        { role: 'system', content: SCOUT_SYSTEM_PROMPT },
+        {
+          role: 'user',
+          content: JSON.stringify({
+            task: 'Route the investigation to verified signals that warrant deeper analysis.',
+            dataMode: 'full',
+            businessSummary: audit.summary,
+            candidateIndex,
+            availableCategories: ALL_LEAK_CATEGORIES,
+          }),
         },
-      },
-      // @ts-expect-error OpenRouter provider extension.
-      provider: {
-        require_parameters: true,
-      },
-    },
-    { signal },
-  )
+      ],
+      tools: [scoutTool],
+      maxTokens: 700,
+      signal,
+    }, LEAKSCOUT_TIMEOUTS_MS.scout)
 
-  const content = final.choices[0]?.message?.content
+    const scoutCall = scout.toolCalls?.find((call) => call.name === 'inspect_verified_leaks')
+    if (!scoutCall) throw new Error('Scout did not call inspect_verified_leaks.')
+    const selection = parseScoutToolArgs(scoutCall.arguments)
+    const inspected = validateCandidateIds(candidates, selection.candidateIds)
+    if (inspected.some((candidate) => !selection.categories.includes(candidate.category))) {
+      throw new Error('Scout selected a candidate outside its declared categories.')
+    }
+    const inspectedIds = new Set(inspected.map((candidate) => candidate.id))
+    toolCallsUsed.push('inspect_verified_leaks')
+    trace.push({ role: 'scout', model: actualModel(scout, scoutModel) })
 
-  if (!content) {
-    throw new Error('LeakScout returned no priority decision.')
-  }
+    const investigatorModel = modelFor('investigator')
+    const investigatorResult = await completeWithTimeout(complete, {
+      role: 'investigator',
+      model: investigatorModel,
+      messages: [
+        { role: 'system', content: INVESTIGATOR_SYSTEM_PROMPT },
+        {
+          role: 'user',
+          content: JSON.stringify({
+            deterministicSummary: audit.summary,
+            selectedCategories: selection.categories,
+            evidenceAreasToExamine: selection.evidenceAreas,
+            inspectedCandidates: inspected,
+            dataQualityLimitations: audit.summary.inventoryDataQuality,
+          }),
+        },
+      ],
+      schema: InvestigationReportSchema,
+      maxTokens: 2_800,
+      signal,
+    }, LEAKSCOUT_TIMEOUTS_MS.investigator)
+    const investigatorDraft = decodeReport(investigatorResult)
+    trace.push({ role: 'investigator', model: actualModel(investigatorResult, investigatorModel) })
 
-  const decision = AgentDecisionSchema.parse(JSON.parse(content))
+    const criticModel = modelFor('critic')
+    let criticReport: z.infer<typeof InvestigationReportSchema> | undefined
+    let criticFailure: unknown
+    try {
+      const criticResult = await completeWithTimeout(complete, {
+        role: 'critic',
+        model: criticModel,
+        messages: [
+          { role: 'system', content: CRITIC_SYSTEM_PROMPT },
+          {
+            role: 'user',
+            content: JSON.stringify({
+              deterministicSummary: audit.summary,
+              allVerifiedCandidates: candidates,
+              scoutSelections: {
+                candidateIds: selection.candidateIds,
+                categories: selection.categories,
+                evidenceAreas: selection.evidenceAreas,
+              },
+              investigatorDraft,
+              dataQualityLimitations: audit.summary.inventoryDataQuality,
+              task: 'Return a corrected, strictly grounded report. You may select any verified candidate in the complete context.',
+            }),
+          },
+        ],
+        schema: InvestigationReportSchema,
+        maxTokens: 2_800,
+        signal,
+      }, LEAKSCOUT_TIMEOUTS_MS.critic)
+      const validatedCritic = decodeReport(criticResult)
+      validateReportGrounding(
+        validatedCritic,
+        { summary: audit.summary, candidates },
+        candidates,
+        new Set(candidates.map((candidate) => candidate.id)),
+      )
+      criticReport = validatedCritic
+      trace.push({ role: 'critic', model: actualModel(criticResult, criticModel) })
+    } catch (error) {
+      criticFailure = error
+    }
 
-  const priorities: VerifiedPriority[] = validatePrioritySelections(
-    candidates,
-    decision.priorities,
-    inspectedCandidateIds,
-  ).map(({ candidate, urgency }) => ({
-    candidate,
-    reasoning: safeReason(candidate),
-    recommendedAction: safeAction(candidate),
-    urgency,
-  }))
+    if (criticReport) {
+      return makeReport(criticReport, candidates, trace, toolCallsUsed)
+    }
 
-  const categories = dedupe(
-    priorities.map((priority) =>
-      categoryLabel(priority.candidate.category),
-    ),
-  )
+    // A failed critic may leave the investigator's draft usable, but only if
+    // it independently passes every deterministic grounding check.
+    try {
+      validateReportGrounding(
+        investigatorDraft,
+        { summary: audit.summary, candidates: inspected },
+        inspected,
+        inspectedIds,
+      )
+    } catch (investigatorError) {
+      const reason = investigatorError instanceof Error
+        ? investigatorError.message
+        : 'Investigator draft failed local grounding.'
+      throw new Error(`Critic failed and investigator draft was unsafe: ${reason}`)
+    }
 
-  const today = priorities
-    .filter((priority) => priority.urgency === 'today')
-    .map((priority) => priority.recommendedAction)
-
-  const thisWeek = priorities
-    .filter((priority) => priority.urgency === 'this_week')
-    .map((priority) => priority.recommendedAction)
-
-  const monitor = priorities.map((priority) =>
-    monitorAction(priority.candidate),
-  )
-
-  return {
-    headline: '3 priority profit leaks need attention',
-    executiveSummary:
-      `LeakScout investigated verified transaction and inventory signals and prioritized ${categories.join(', ')}.`,
-    priorities,
-    actionPlan: {
-      today: dedupe(today).slice(0, 3),
-      thisWeek: dedupe(thisWeek).slice(0, 3),
-      monitor: dedupe(monitor).slice(0, 3),
-    },
-    model: final.model ?? DEFAULT_MODEL,
-    toolCalls: [...new Set(toolCallsUsed)],
+    void criticFailure
+    return makeReport(investigatorDraft, inspected, trace, toolCallsUsed)
+  } catch (error) {
+    const message = error instanceof Error
+      ? error.message
+      : 'LeakScout investigation failed.'
+    throw new LeakScoutPipelineError(message, trace, toolCallsUsed)
   }
 }

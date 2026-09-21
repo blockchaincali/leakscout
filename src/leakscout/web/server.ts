@@ -251,7 +251,7 @@ app.get(
       service: 'LeakScout',
       version: '0.2.0',
       architecture:
-        'deterministic-analysis + conditional-Orbio-agent',
+        'deterministic-analysis + staged-multi-model-Orbio-investigation',
       modes: [
         'full',
         'sales_only',

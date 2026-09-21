@@ -1,11 +1,10 @@
 import { z } from 'zod'
+import type OpenAI from 'openai'
 import { AssistantInferenceError, InputError } from '../errors.js'
+import { LEAKSCOUT_MODELS, LEAKSCOUT_TIMEOUTS_MS } from '../../lib/modelConfig.js'
 
 const MAX_ASSISTANT_TOKENS = 650
 const MAX_PUBLIC_ASSISTANT_TOKENS = 350
-const ASSISTANT_TIMEOUT_MS = 20_000
-const ASSISTANT_MODEL =
-  process.env.OPENROUTER_MODEL ?? 'anthropic/claude-sonnet-4.5'
 
 const categorySchema = z.enum([
   'stockout_risk',
@@ -38,6 +37,11 @@ const verifiedPrioritySchema = z
     impact: impactSchema.optional(),
     evidence: z.array(z.string().trim().min(1).max(1_000)).max(20),
     recommendedAction: z.string().trim().min(1).max(1_000),
+    whyItMatters: z.string().trim().min(1).max(900).optional(),
+    reasoning: z.string().trim().min(1).max(1_000).optional(),
+    checksToPerform: z.array(z.string().trim().min(1).max(350)).max(4).optional(),
+    watchFor: z.array(z.string().trim().min(1).max(350)).max(3).optional(),
+    assumptionsOrUnknowns: z.array(z.string().trim().min(1).max(350)).max(4).optional(),
   })
   .strict()
 
@@ -54,6 +58,11 @@ export const VerifiedLeakScoutContextSchema = z
     verifiedSignalCount: z.number().int().nonnegative().max(5_000),
     priorities: z.array(verifiedPrioritySchema).max(30),
     limitations: z.array(z.string().trim().min(1).max(1_000)).max(30),
+    actionPlan: z.object({
+      today: z.array(z.string().trim().min(1).max(1_000)).max(10),
+      thisWeek: z.array(z.string().trim().min(1).max(1_000)).max(10),
+      monitor: z.array(z.string().trim().min(1).max(1_000)).max(10),
+    }).strict().optional(),
   })
   .strict()
   .superRefine((context, refinement) => {
@@ -192,8 +201,10 @@ If the evidence does not establish a cause, clearly say that the cause cannot
 yet be confirmed, then recommend which business facts the merchant should
 check. Explicitly acknowledge missing context when it affects the answer.
 
-Use plain, concise, actionable business language. Candidate references must be
-exact IDs from the supplied context. Return only the requested JSON object.
+Use plain, concise, actionable business language. The context may include the
+final investigated report, richer priorities, checks and action plan; summarize
+those verified details where useful. Candidate references must be exact IDs
+from the supplied context. Return only the requested JSON object.
 `.trim()
 
 const PUBLIC_ASSISTANT_SYSTEM_PROMPT = `
@@ -252,13 +263,13 @@ export function parsePublicAssistantRequest(
   return parsed.data
 }
 
-async function defaultCompletion(
+export async function completeAssistantWithClient(
+  client: OpenAI,
   request: AssistantCompletionRequest,
 ): Promise<AssistantCompletionResult> {
-  const { openrouter, DEFAULT_MODEL } = await import('../../lib/openrouter.js')
-  const response = await openrouter.chat.completions.create(
+  const response = await client.chat.completions.create(
     {
-      model: DEFAULT_MODEL,
+      model: request.model,
       messages: [
         { role: 'system', content: request.system },
         { role: 'user', content: request.user },
@@ -278,8 +289,15 @@ async function defaultCompletion(
 
   return {
     content: response.choices[0]?.message?.content ?? null,
-    model: response.model ?? DEFAULT_MODEL,
+    model: response.model ?? request.model,
   }
+}
+
+async function defaultCompletion(
+  request: AssistantCompletionRequest,
+): Promise<AssistantCompletionResult> {
+  const { openrouter } = await import('../../lib/openrouter.js')
+  return completeAssistantWithClient(openrouter, request)
 }
 
 function numericFacts(value: unknown): Set<number> {
@@ -318,6 +336,8 @@ function assertGroundedOutput(
 
 async function infer<T>(
   context: VerifiedLeakScoutContext,
+  model: string,
+  timeoutMs: number,
   schema: z.ZodType<T>,
   schemaName: string,
   task: Record<string, unknown>,
@@ -331,7 +351,7 @@ async function infer<T>(
     const complete = options.complete ?? defaultCompletion
     const result = await Promise.race([
       complete({
-        model: ASSISTANT_MODEL,
+        model,
         system: SYSTEM_PROMPT,
         user: JSON.stringify({ verifiedContext: context, ...task }),
         schemaName,
@@ -343,7 +363,7 @@ async function infer<T>(
         timer = setTimeout(() => {
           controller.abort()
           reject(new AssistantInferenceError())
-        }, ASSISTANT_TIMEOUT_MS)
+        }, timeoutMs)
       }),
     ])
 
@@ -365,7 +385,7 @@ async function infer<T>(
     return {
       ...parsed.data,
       poweredBy: 'Orbio',
-      model: result.model ?? ASSISTANT_MODEL,
+      model: result.model ?? model,
       inferenceUsed: true,
     }
   } catch (error) {
@@ -383,6 +403,8 @@ export async function generateAiBrief(
   const parsed = parseBriefRequest(request)
   return infer(
     parsed.context,
+    LEAKSCOUT_MODELS.brief,
+    LEAKSCOUT_TIMEOUTS_MS.brief,
     briefOutputSchema,
     'leakscout_ai_brief',
     {
@@ -401,6 +423,8 @@ export async function answerLeakScoutQuestion(
   const parsed = parseChatRequest(request)
   return infer(
     parsed.context,
+    LEAKSCOUT_MODELS.chat,
+    LEAKSCOUT_TIMEOUTS_MS.chat,
     chatOutputSchema,
     'leakscout_chat_answer',
     {
@@ -425,7 +449,7 @@ export async function answerPublicLeakScoutQuestion(
     const complete = options.complete ?? defaultCompletion
     const result = await Promise.race([
       complete({
-        model: ASSISTANT_MODEL,
+        model: LEAKSCOUT_MODELS.publicAssistant,
         system: PUBLIC_ASSISTANT_SYSTEM_PROMPT,
         user: JSON.stringify({ question: parsed.question }),
         schemaName: 'leakscout_public_assistant_answer',
@@ -440,7 +464,7 @@ export async function answerPublicLeakScoutQuestion(
         timer = setTimeout(() => {
           controller.abort()
           reject(new AssistantInferenceError())
-        }, ASSISTANT_TIMEOUT_MS)
+        }, LEAKSCOUT_TIMEOUTS_MS.publicAssistant)
       }),
     ])
 

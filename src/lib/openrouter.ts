@@ -1,9 +1,5 @@
-import { config } from 'dotenv'
 import OpenAI from 'openai'
-
-// `.env.local` first, `.env` as a fallback. `dotenv/config` reads only `.env`,
-// which is exactly the file the README tells you not to put a key in.
-config({ path: ['.env.local', '.env'], quiet: true })
+import { DEFAULT_MODEL } from './modelConfig.js'
 
 /**
  * One client, one key.
@@ -48,4 +44,4 @@ export const openrouterFetch = (path: string, init: RequestInit = {}) =>
  * A sensible default. Swap freely — any model on openrouter.ai/models works,
  * and `openrouter/auto` lets the router pick per request.
  */
-export const DEFAULT_MODEL = process.env.OPENROUTER_MODEL ?? 'anthropic/claude-sonnet-4.5'
+export { DEFAULT_MODEL }

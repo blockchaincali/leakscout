@@ -1,14 +1,12 @@
 import { z } from 'zod'
 import type { LeakCategory } from '../types.js'
-import type { AgentDecision } from './schemas.js'
+import {
+  ALL_LEAK_CATEGORIES,
+  ScoutToolArgsSchema,
+  type AgentDecision,
+} from './schemas.js'
 
-export const ALL_LEAK_CATEGORIES: LeakCategory[] = [
-  'stockout_risk',
-  'margin_compression',
-  'dead_inventory',
-  'sales_anomaly',
-  'inventory_exposure',
-]
+export { ALL_LEAK_CATEGORIES }
 
 export function parseInvestigationCategories(raw: string): LeakCategory[] {
   const schema = z.object({
@@ -18,8 +16,32 @@ export function parseInvestigationCategories(raw: string): LeakCategory[] {
   try {
     return schema.parse(JSON.parse(raw || '{}')).categories
   } catch {
-    return ALL_LEAK_CATEGORIES
+    return [...ALL_LEAK_CATEGORIES]
   }
+}
+
+export function parseScoutToolArgs(raw: string) {
+  return ScoutToolArgsSchema.parse(JSON.parse(raw || '{}'))
+}
+
+export function validateCandidateIds<T extends { id: string }>(
+  candidates: T[],
+  candidateIds: string[],
+  minimum = 3,
+): T[] {
+  if (candidateIds.length < minimum) {
+    throw new Error(`Scout must select at least ${minimum} verified candidates.`)
+  }
+
+  if (new Set(candidateIds).size !== candidateIds.length) {
+    throw new Error('Scout selected a duplicate candidate ID.')
+  }
+
+  return candidateIds.map((id) => {
+    const candidate = candidates.find((item) => item.id === id)
+    if (!candidate) throw new Error(`Scout selected unknown candidate: ${id}`)
+    return candidate
+  })
 }
 
 export function validatePrioritySelections<T extends { id: string }>(
